@@ -141,15 +141,25 @@ public class EnsureTraversabilityStep extends BaseModificationStep {
         Node startNode = findNode(object, bestSplitLine.getOrigin());
         Node endNode = findNode(object, bestSplitLine.getEndPoint());
 
+        if (startNode == null || endNode == null) return Collections.emptyList();
+
         return splitObject(object, startNode, endNode);
     }
 
     private Node findNode(TemporaryObject object, Point2D point) {
         List<Node> nodes = object.getNodes();
+        Node closest = null;
+        double minDist = Double.MAX_VALUE;
+
         for (Node node : nodes) {
-            if (node.getCoordinates().equals(point)) return node;
+            double dist = GeometryTools2D.getDistance(node.getCoordinates(), point);
+            if (dist < minDist) {
+                minDist = dist;
+                closest = node;
+            }
         }
-        return null;
+
+        return (closest != null && minDist <= threshold) ? closest : null;
     }
 
     private List<TemporaryObject> splitObject(TemporaryObject object, Node start, Node end) {
