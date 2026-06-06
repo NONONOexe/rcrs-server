@@ -41,7 +41,10 @@ public class EnsureTraversabilityStep extends BaseModificationStep {
         for (TemporaryObject object : initialAllObjects) {
 
             // Check if centroid can reach passable edges.
-            if (isValidObject(object)) continue;
+            if (isValidObject(object)) {
+                bumpProgress();
+                continue;
+            }
 
             ArrayDeque<TemporaryObject> toProcess = new ArrayDeque<>();
             toProcess.offer(object);
@@ -110,7 +113,7 @@ public class EnsureTraversabilityStep extends BaseModificationStep {
         List<Line2D> splitLines = generateSplitLines(object, concavePoints);
         if (splitLines.isEmpty()) return Collections.emptyList();
 
-        double minConcaveCount = concavePoints.size();
+        double minConcaveCount = concavePoints.size() + 1;
         Line2D bestSplitLine = null;
         for (Line2D line : splitLines) {
             List<Point2D> polygon = object.getVertices();
@@ -240,28 +243,31 @@ public class EnsureTraversabilityStep extends BaseModificationStep {
         return concaveVertices;
     }
 
-    private static List<Line2D> generateSplitLines(TemporaryObject object, List<Point2D> concaveVertices) {
-        List<Line2D> splitLines = new ArrayList<>();
-        List<Point2D> polygonVertices = object.getVertices();
-        int n = polygonVertices.size();
+    private static List<Line2D> generateSplitLines(
+            final TemporaryObject object, final List<Point2D> concaveVertices) {
+        final List<Line2D> splitLines = new ArrayList<>();
+        final List<Point2D> polygonVertices = object.getVertices();
+        // The last vertex duplicates the first to close the polygon; exclude it.
+        final int n = polygonVertices.size() - 1;
 
-        for (Point2D concaveVertex : concaveVertices) {
-            int index = polygonVertices.indexOf(concaveVertex);
-            int prev = (index - 1 + n) % n;
-            int next = (index + 1) % n;
+        for (final Point2D concaveVertex : concaveVertices) {
+            final int index = polygonVertices.indexOf(concaveVertex);
+            final int prev = (index - 1 + n) % n;
+            final int next = (index + 1) % n;
 
-            for (int i = 0; i < polygonVertices.size(); i++) {
+            for (int i = 0; i < n; i++) {
                 if (i == index || i == prev || i == next) continue;
 
-                Point2D candidateVertex = polygonVertices.get(i);
-                Line2D line = new Line2D(concaveVertex, candidateVertex);
-                Line2D reverseLine = new Line2D(candidateVertex, concaveVertex);
+                final Point2D candidateVertex = polygonVertices.get(i);
+                final Line2D line = new Line2D(concaveVertex, candidateVertex);
+                final Line2D reverseLine = new Line2D(candidateVertex, concaveVertex);
 
                 if (splitLines.contains(line) || splitLines.contains(reverseLine)) continue;
 
                 splitLines.add(line);
             }
         }
+
         return splitLines;
     }
 

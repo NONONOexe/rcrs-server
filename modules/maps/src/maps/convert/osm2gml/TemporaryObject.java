@@ -58,15 +58,14 @@ public abstract class TemporaryObject implements SpatialIndexable {
      * @return The nodes.
      */
     public List<Node> getNodes() {
-        List<Node> nodes = new ArrayList<>();
+        final List<Node> nodes = new ArrayList<>();
         if (edges.isEmpty()) return Collections.unmodifiableList(nodes);
 
-        Node first = edges.get(0).getStartNode();
-        nodes.add(first);
-
-        for (int i = 1; i < edges.size(); ++i) {
-            Node last = edges.get(i).getEndNode();
-            if (!last.equals(first)) nodes.add(last);
+        // Collect the start node of each edge; this covers all vertices without duplication.
+        final Node first = edges.getFirst().getStartNode();
+        for (final DirectedEdge edge : edges) {
+            final Node start = edge.getStartNode();
+            if (!start.equals(first) || nodes.isEmpty()) nodes.add(start);
         }
 
         return Collections.unmodifiableList(nodes);
