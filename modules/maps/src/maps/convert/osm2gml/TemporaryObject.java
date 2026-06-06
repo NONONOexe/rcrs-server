@@ -77,13 +77,15 @@ public abstract class TemporaryObject implements SpatialIndexable {
      * @return An unmodifiable list of Point2D representing the vertices of the object.
      */
     public List<Point2D> getVertices() {
-        List<Point2D> vertices = new ArrayList<>();
+        final List<Point2D> vertices = new ArrayList<>();
         if (edges.isEmpty()) return Collections.unmodifiableList(vertices);
 
-        vertices.add(edges.get(0).getStartCoordinates());
-        for (DirectedEdge edge : edges) {
-            vertices.add(edge.getEndCoordinates());
+        // Add the start node of each edge: the last edge's and equal the first's start,
+        // so adding it explicitly closes the polygon without duplication.
+        for (final DirectedEdge edge : edges) {
+            vertices.add(edge.getStartCoordinates());
         }
+        vertices.add(edges.getFirst().getStartCoordinates());
 
         return Collections.unmodifiableList(vertices);
     }

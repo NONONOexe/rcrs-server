@@ -16,7 +16,6 @@ import java.util.List;
  */
 public class EnsureTraversabilityStep extends BaseModificationStep {
     private final double threshold;
-    private static final int MAX_SPLIT_ITERATIONS = 5;
 
     public EnsureTraversabilityStep(TemporaryMap map) {
         super(map);
@@ -50,8 +49,7 @@ public class EnsureTraversabilityStep extends BaseModificationStep {
             toProcess.offer(object);
             modifiedShapes.add(object);
 
-            int iteration = 0;
-            while (!toProcess.isEmpty() && iteration < MAX_SPLIT_ITERATIONS) {
+            while (!toProcess.isEmpty()) {
                 TemporaryObject current = toProcess.poll();
                 List<TemporaryObject> newShapes = splitObject(current);
                 totalSplits++;
@@ -108,31 +106,34 @@ public class EnsureTraversabilityStep extends BaseModificationStep {
         return true;
     }
 
-    private List<TemporaryObject> splitObject(TemporaryObject object) {
-        List<Point2D> concavePoints = findConcaveVertices(object.getVertices());
-        List<Line2D> splitLines = generateSplitLines(object, concavePoints);
+    private List<TemporaryObject> splitObject(final TemporaryObject object) {
+        final List<Point2D> concavePoints = findConcaveVertices(object.getVertices());
+        final List<Line2D> splitLines = generateSplitLines(object, concavePoints);
         if (splitLines.isEmpty()) return Collections.emptyList();
 
         double minConcaveCount = concavePoints.size() + 1;
         Line2D bestSplitLine = null;
-        for (Line2D line : splitLines) {
-            List<Point2D> polygon = object.getVertices();
-            Point2D point1 = line.getOrigin();
-            Point2D point2 = line.getEndPoint();
-            List<List<Point2D>> splitPolygons = splitPolygon(polygon, point1, point2);
+        for (final Line2D line : splitLines) {
+            final List<Point2D> polygon = object.getVertices();
+            final Point2D point1 = line.getOrigin();
+            final Point2D point2 = line.getEndPoint();
+            final List<List<Point2D>> splitPolygons = splitPolygon(polygon, point1, point2);
             if (splitPolygons.size() != 2) continue;
 
-            double totalArea = GeometryTools2D.computeArea(polygon);
-            double area1 = GeometryTools2D.computeArea(splitPolygons.get(0));
-            double area2 = GeometryTools2D.computeArea(splitPolygons.get(1));
+            // Skip this line if it crosses any edge of the polygon.
+            final boolean crossesEdge = object.getLines().stream().anyMatch(edge -> crosses(edge, line));
+            if (crossesEdge) continue;
 
             // Skip this line if it extends outside the original polygon.
-            if (threshold * threshold < area1 + area2 - totalArea) continue;
+            final double totalArea = GeometryTools2D.computeArea(polygon);
+            final double area1 = GeometryTools2D.computeArea(splitPolygons.get(0));
+            final double area2 = GeometryTools2D.computeArea(splitPolygons.get(1));
+            final double areaError = area1 + area2 - totalArea;
+            if (threshold * threshold < areaError) continue;
 
-            int concave1 = findConcaveVertices(splitPolygons.get(0)).size();
-            int concave2 = findConcaveVertices(splitPolygons.get(1)).size();
-            int totalConcaveCount = concave1 + concave2;
-
+            final int concave1 = findConcaveVertices(splitPolygons.get(0)).size();
+            final int concave2 = findConcaveVertices(splitPolygons.get(1)).size();
+            final int totalConcaveCount = concave1 + concave2;
             if (totalConcaveCount < minConcaveCount) {
                 minConcaveCount = totalConcaveCount;
                 bestSplitLine = line;
@@ -205,18 +206,19 @@ public class EnsureTraversabilityStep extends BaseModificationStep {
         return List.of(path1, path2);
     }
 
-    private List<Point2D> getVerticesPath(List<Point2D> vertices, Point2D start, Point2D end) {
-        List<Point2D> pathVertices = new ArrayList<>();
-        int n = vertices.size();
-        boolean started = false;
+    private List<Point2D> getVerticesPath(
+            final List<Point2D> vertices, final Point2D start, final Point2D end) {
+        // The last vertex duplicates the first to close the polygon; exclude it.
+        final int n = vertices.size() - 1;
+        final List<Point2D> pathVertices = new ArrayList<>();
 
+        boolean started = false;
         for (int i = 0; i < n * 2; i++) {
-            Point2D vertex = vertices.get(i % n);
+            final Point2D vertex = vertices.get(i % n);
             if (vertex.equals(start)) started = true;
             if (started) pathVertices.add(vertex);
             if (vertex.equals(end) && started) break;
         }
-        pathVertices.add(start); // Close path.
 
         return pathVertices;
     }
