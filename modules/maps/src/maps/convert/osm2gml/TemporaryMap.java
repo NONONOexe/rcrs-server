@@ -394,13 +394,17 @@ public class TemporaryMap {
     }
 
     /**
-       Get a DirectedEdge between two nodes.
-       @param from The from node.
-       @param to The to node.
-       @return A new DirectedEdge.
-    */
-    public DirectedEdge getDirectedEdge(Node from, Node to) {
-        Edge e = getEdge(from, to);
+     * Get a {@code DirectedEdge} between two nodes.
+     * Returns {@code null} if the two nodes are the same, as a zero-length edge
+     * degenerates to a single node and should be treated as absent.
+     * @param from The from node.
+     * @param to   The to node.
+     * @return     A new {@code DirectedEdge}, or {@code null} if {@code from} and
+     *             {@code to} are the same node.
+     */
+    public DirectedEdge getDirectedEdge(final Node from, final Node to) {
+        if (from.equals(to)) return null;
+        final Edge e = getEdge(from, to);
         return new DirectedEdge(e, from);
     }
 

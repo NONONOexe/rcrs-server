@@ -111,13 +111,21 @@ public class SplitSelfIntersectingBuildingsStep extends BaseModificationStep {
 
         // First polygon: edges from first occurrence to second occurrence, closed by pivot.
         final List<DirectedEdge> path1 = new ArrayList<>(edges.subList(first, second));
+        final DirectedEdge closeEdge1 = map.getDirectedEdge(edges.get(second).getStartNode(), pivot);
+
+
         path1.add(map.getDirectedEdge(edges.get(second).getStartNode(), pivot));
 
         // Second polygon: edges from second occurrence to end, then from start to first
         // occurrence, close by pivot.
         final List<DirectedEdge> path2 = new ArrayList<>(edges.subList(second, edges.size()));
         path2.addAll(edges.subList(0, first));
-        path2.add(map.getDirectedEdge(edges.get(first).getStartNode(), pivot));
+        final DirectedEdge closeEdge2 = map.getDirectedEdge(edges.get(first).getStartNode(), pivot);
+
+        // Guard: closing edge would be zero-length; splitting is not possible.
+        if (closeEdge1 == null || closeEdge2 == null) {
+            return Collections.emptyList();
+        }
 
         // Guard: discard degenerate polygons with fewer than 3 edges.
         if (path1.size() < 3 || path2.size() < 3) {

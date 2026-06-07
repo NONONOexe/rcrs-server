@@ -69,7 +69,7 @@ public class SplitIntersectingEdgesStep extends ConvertStep {
                 Edge next = edgeThisPass.get(i);
                 Set<Edge> nearbyEdges = grid.getNearbyItems(next);
 
-                if (check(next, nearbyEdges)) {
+                if (splitEdgeIfIntersecting(next, nearbyEdges)) {
                     anySplitInPass = true;
                 }
 
@@ -85,50 +85,61 @@ public class SplitIntersectingEdgesStep extends ConvertStep {
         setStatus("Inspected " + inspectedCount + " edges and split " + splitCount + " times over " + pass + " passes");
     }
 
-    private boolean check(Edge e, Set<Edge> candidates) {
-        if (!map.getAllEdges().contains(e) || seen.contains(e)) {
-            return false;
-        }
-        seen.add(e);
-        boolean splitOccurred = false;
+    // Check if the target edge intersects with any of the candidate edges and splits them if necessary.
+    // The process repeats until no further splits occur for the target edge in a single iteration.
+    private boolean splitEdgeIfIntersecting(final Edge targetEdge, final Set<Edge> candidateEdges) {
+        // Abort if the target edge has already been deleted from the map,
+        // or if we have already processed it.
+        if (!map.getAllEdges().contains(targetEdge) || seen.contains(targetEdge)) return false;
+        seen.add(targetEdge);
 
+        boolean hasSplitOccurred = false;
+
+        // Keep checking the candidate edges until a full pass completes without any splits.
+        // This is necessary because splitting an edge alters the map topology.
         while (true) {
-            boolean mapChangedThisIteration = false;
+            boolean edgeSplitThisIteration = false;
 
-            for (Edge test : candidates) {
-                if (test.equals(e)) {
-                    continue;
-                }
-                if (!map.getAllEdges().contains(e)) {
-                    return splitOccurred;
-                }
+            for (final Edge candidateEdge : candidateEdges) {
+                // Skip comparing the target edge with itself.
+                if (candidateEdge.equals(targetEdge)) continue;
 
-                boolean split = false;
+                // Skip this candidate if it was already split and removed from the map in a previous
+                // iteration (Ghost Edge).
+                if (!map.getAllEdges().contains(candidateEdge)) continue;
 
-                Line2D l1 = e.getLine();
-                Line2D l2 = test.getLine();
-                if (GeometryTools2D.parallel(l1, l2)) {
-                    if (processParallelLines(e, test)) {
-                        split = true;
+                // If the target edge itself was split and removed during this loop, stop processing.
+                if (!map.getAllEdges().contains(targetEdge)) return hasSplitOccurred;
+
+                boolean didSplit = false;
+                final Line2D targetLine    = targetEdge.getLine();
+                final Line2D candidateLine = candidateEdge.getLine();
+
+                // Check for overlap if the lines are parallel, otherwise check for standard intersection.
+                if (GeometryTools2D.parallel(targetLine, candidateLine)) {
+                    if (processParallelLines(targetEdge, candidateEdge)) {
+                        didSplit = true;
                     }
                 } else {
-                    if (checkForIntersection(e, test)) {
-                        split = true;
+                    if (checkForIntersection(targetEdge, candidateEdge)) {
+                        didSplit = true;
                     }
                 }
 
-                if (split) {
-                    mapChangedThisIteration = true;
-                    splitOccurred = true;
+                // If a split happened, update the flags and break out of the for-loop to restart
+                // the candidate check.
+                if (didSplit) {
+                    edgeSplitThisIteration = true;
+                    hasSplitOccurred = true;
                     break;
                 }
             }
 
-            if (!mapChangedThisIteration) {
-                break;
-            }
+            // If we checked all valid candidates and no splits occured, we are done with this target edge.
+            if (!edgeSplitThisIteration) break;
         }
-        return splitOccurred;
+
+        return hasSplitOccurred;
     }
 
     /**
@@ -265,46 +276,74 @@ public class SplitIntersectingEdgesStep extends ConvertStep {
 
         if (splitFirst) {
             map.splitEdge(first, n);
-            ++splitCount;
+            splitCount++;
         }
         if (splitSecond) {
             map.splitEdge(second, n);
-            ++splitCount;
+            splitCount++;
         }
 
         return splitFirst || splitSecond;
     }
 
-    private void processInternalEdge(Edge shorter, Edge longer) {
-        // Split longer into (up to) three chunks
-        double t1 = GeometryTools2D.positionOnLine(longer.getLine(), shorter.getLine().getOrigin());
-        double t2 = GeometryTools2D.positionOnLine(longer.getLine(), shorter.getLine().getEndPoint());
-        Node first;
-        Node second;
-        if (t1 < t2) {
-            first = shorter.getStart();
-            second = shorter.getEnd();
+    // Splits the longer edge into chunks using the endpoints of the internal shorter edge.
+    private void processInternalEdge(final Edge shorterEdge, final Edge longerEdge) {
+        final double t1 = GeometryTools2D.positionOnLine(longerEdge.getLine(), shorterEdge.getLine().getOrigin());
+        final double t2 = GeometryTools2D.positionOnLine(longerEdge.getLine(), shorterEdge.getLine().getEndPoint());
+
+        final Node firstCutPoint = (t1 < t2) ? shorterEdge.getStart() : shorterEdge.getEnd();
+        final Node secondCutPoint = (t1 < t2) ? longerEdge.getEnd() : longerEdge.getStart();
+
+        // Check validity to prevent zero-length edges.
+        final boolean isFirstValid =
+                !firstCutPoint.equals(longerEdge.getStart()) && !firstCutPoint.equals(longerEdge.getEnd());
+        final boolean isSecondValid =
+                !secondCutPoint.equals(longerEdge.getStart()) && !secondCutPoint.equals(longerEdge.getEnd());
+
+        if (isFirstValid && isSecondValid) {
+            map.splitEdge(longerEdge, firstCutPoint, secondCutPoint);
+            splitCount += 2;
+        } else if (isFirstValid) {
+            map.splitEdge(longerEdge, firstCutPoint);
+            splitCount++;
+        } else if (isSecondValid) {
+            map.splitEdge(longerEdge, secondCutPoint);
+            splitCount++;
         }
-        else {
-            first = shorter.getEnd();
-            second = shorter.getStart();
-        }
-        map.splitEdge(longer, first, second);
-        ++splitCount;
     }
 
-    private void processCoincidentNode(Edge shorter, Edge longer, Node coincidentPoint) {
-        // Split the long edge at the non-coincident point
-        Node cutPoint = coincidentPoint.equals(shorter.getStart()) ? shorter.getEnd() : shorter.getStart();
-        map.splitEdge(longer, cutPoint);
-        ++splitCount;
+    // Splits the longer edge at the non-shared node of the shorter edge.
+    private void processCoincidentNode(
+            final Edge shorterEdge, final Edge longerEdge, final Node sharedNode) {
+        // Find the node of the shorter edge that is not shared with the longer edge.
+        final Node cutPoint = sharedNode.equals(shorterEdge.getStart()) ?
+                shorterEdge.getEnd() : shorterEdge.getStart();
+
+        // Prevent zero-length edges: ensure the cut point isn't already an endpoint
+        // of the longer edge.
+        if (!cutPoint.equals(longerEdge.getStart()) && !cutPoint.equals(longerEdge.getEnd())) {
+            map.splitEdge(longerEdge, cutPoint);
+            splitCount++;
+        }
     }
 
-    private void processOverlap(Edge shorter, Edge longer) {
-        Node shortSplit = GeometryTools2D.contains(shorter.getLine(), longer.getLine().getOrigin()) ? longer.getStart() : longer.getEnd();
-        Node longSplit = GeometryTools2D.contains(longer.getLine(), shorter.getLine().getOrigin()) ? shorter.getStart() : shorter.getEnd();
-        map.splitEdge(shorter, shortSplit);
-        map.splitEdge(longer, longSplit);
-        ++splitCount;
+    // Splits both edges where they partially overlap.
+    private void processOverlap(final Edge shorterEdge, final Edge longerEdge) {
+        final Node shorterCutPoint = GeometryTools2D.contains(shorterEdge.getLine(), longerEdge.getLine().getOrigin()) ?
+                longerEdge.getStart() : longerEdge.getEnd();
+        final Node longerCutPoint = GeometryTools2D.contains(longerEdge.getLine(), shorterEdge.getLine().getOrigin()) ?
+                shorterEdge.getStart() : shorterEdge.getEnd();
+
+        // Prevent zero-length edges for the shorter edge.
+        if (!shorterCutPoint.equals(shorterEdge.getStart()) && !shorterCutPoint.equals(shorterEdge.getEnd())) {
+            map.splitEdge(shorterEdge, shorterCutPoint);
+            splitCount++;
+        }
+
+        // Prevent zero-length edges for the longer edge.
+        if (!longerCutPoint.equals(longerEdge.getStart()) && !longerCutPoint.equals(longerEdge.getEnd())) {
+            map.splitEdge(longerEdge, longerCutPoint);
+            splitCount++;
+        }
     }
 }
