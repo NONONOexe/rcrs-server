@@ -53,7 +53,6 @@ public class EnsureTraversabilityStep extends BaseModificationStep {
                 TemporaryObject current = toProcess.poll();
                 List<TemporaryObject> newShapes = splitObject(current);
                 totalSplits++;
-                iteration++;
 
                 for (TemporaryObject newObject : newShapes) {
                     if (isValidObject(newObject)) {
