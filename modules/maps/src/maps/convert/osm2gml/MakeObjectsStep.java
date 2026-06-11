@@ -15,18 +15,26 @@ import java.util.HashMap;
 import java.util.Collection;
 
 /**
-   This step creates the final GML objects.
-*/
+ * This step creates the final GML objects from the temporary OSM representations.
+ *
+ * <p>
+ * It handles the calculation of the map's bounding box and scale (converting coordinates
+ * to meters), and translates all {@code Node}, {@code Edge}, and
+ * {@code TemporaryObject} instances into their corresponding GML representations
+ * (nodes, edges, buildings, roads, and intersections). Finally, it establishes
+ * the topological neighbor relationships between the generated shapes.
+ */
 public class MakeObjectsStep extends ConvertStep {
-    private TemporaryMap map;
-    private GMLMap gmlMap;
+    private final TemporaryMap map;
+    private final GMLMap gmlMap;
 
     /**
-       Construct a MakeObjectsStep.
-       @param map The TemporaryMap to read.
-       @param gmlMap The GMLMap to populate.
-    */
-    public MakeObjectsStep(TemporaryMap map, GMLMap gmlMap) {
+     * Constructs a {@code MakeObjectsStep}.
+     *
+     * @param map    The {@code TemporaryMap} to road data from.
+     * @param gmlMap The {@code GMLMap} to populate with the final objects.
+     */
+    public MakeObjectsStep(final TemporaryMap map, final GMLMap gmlMap) {
         super();
         this.map = map;
         this.gmlMap = gmlMap;
