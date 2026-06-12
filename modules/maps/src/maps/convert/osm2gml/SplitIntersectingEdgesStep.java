@@ -18,6 +18,9 @@ public class SplitIntersectingEdgesStep extends ConvertStep {
     private int splitCount;
     private Set<Edge> seen;
 
+    // Tolerance used when comparing t-parameters in diagonal-line containment checks.
+    private static final double T_PARAMETER_TOLERANCE = 1e-8;
+
     /**
        Construct a SplitIntersectingEdgesStep.
        @param map The TemporaryMap to use.
@@ -135,7 +138,7 @@ public class SplitIntersectingEdgesStep extends ConvertStep {
                 }
             }
 
-            // If we checked all valid candidates and no splits occured, we are done with this target edge.
+            // If we checked all valid candidates and no splits occurred, we are done with this target edge.
             if (!edgeSplitThisIteration) break;
         }
 
@@ -145,86 +148,63 @@ public class SplitIntersectingEdgesStep extends ConvertStep {
     /**
        @return True if e1 was split.
     */
-    private boolean processParallelLines(Edge e1, Edge e2) {
-        Node e1Start = e1.getStart();
-        Node e1End = e1.getEnd();
-        Node e2Start = e2.getStart();
-        Node e2End = e2.getEnd();
+    private boolean processParallelLines(final Edge e1, final Edge e2) {
+        final double e1Length  = e1.getLine().getDirection().getLength();
+        final double e2Length  = e2.getLine().getDirection().getLength();
+        final Edge shorterEdge = e1Length < e2Length ? e1 : e2;
+        final Edge longerEdge  = e1Length < e2Length ? e2 : e1;
 
-        // If the two parallel lines already share an endpoint, they are considered
-        // connected, and we should not attempt to split them further.
-        if (e1Start.equals(e2Start) || e1Start.equals(e2End) || e1End.equals(e2Start) || e1End.equals(e2End)) {
-            return false; // Already connected, do nothing.
-        }
+        final boolean isShorterStartEqualsLongerStart = shorterEdge.getStart().equals(longerEdge.getStart());
+        final boolean isShorterStartEqualsLongerEnd   = shorterEdge.getStart().equals(longerEdge.getEnd());
+        final boolean isShorterEndEqualsLongerStart   = shorterEdge.getEnd().equals(longerEdge.getStart());
+        final boolean isShorterEndEqualsLongerEnd     = shorterEdge.getEnd().equals(longerEdge.getEnd());
 
-        // Then, check for coordinate proximity (handles distinct nodes at same location)
-        if (map.isNear(e1Start.getCoordinates(), e2Start.getCoordinates())
-         || map.isNear(e1Start.getCoordinates(), e2End.getCoordinates())
-         || map.isNear(e1End.getCoordinates(), e2Start.getCoordinates())
-         || map.isNear(e1End.getCoordinates(), e2End.getCoordinates())) {
-            return false;
-        }
+        final boolean isStartShared = isShorterStartEqualsLongerStart || isShorterStartEqualsLongerEnd;
+        final boolean isEndShared   = isShorterEndEqualsLongerStart   || isShorterEndEqualsLongerEnd;
+        final Point2D shorterStart  = shorterEdge.getStart().getCoordinates();
+        final Point2D shorterEnd    = shorterEdge.getEnd().getCoordinates();
+        final boolean isStartInside = !isStartShared && containsRobust(longerEdge.getLine(), shorterStart);
+        final boolean isEndInside   = !isEndShared   && containsRobust(longerEdge.getLine(), shorterEnd);
 
-        // Possible cases:
-        // Shorter line entirely inside longer
-        // Shorter line overlaps longer at longer start
-        // Shorter line overlaps longer at longer end
-        // Shorter line start point is same as longer start and end point is inside
-        // Shorter line start point is same as longer end and end point is inside
-        // Shorter line end point is same as longer start and start point is inside
-        // Shorter line end point is same as longer end and start point is inside
-        Edge shorterEdge = e1;
-        Edge longerEdge = e2;
-        if (e1.getLine().getDirection().getLength() > e2.getLine().getDirection().getLength()) {
-            shorterEdge = e2;
-            longerEdge = e1;
-        }
-        Line2D shorter = shorterEdge.getLine();
-        Line2D longer = longerEdge.getLine();
-        boolean shortStartLongStart = shorterEdge.getStart() == longerEdge.getStart();
-        boolean shortStartLongEnd = shorterEdge.getStart() == longerEdge.getEnd();
-        boolean shortEndLongStart = shorterEdge.getEnd() == longerEdge.getStart();
-        boolean shortEndLongEnd = shorterEdge.getEnd() == longerEdge.getEnd();
-        boolean startInside = !shortStartLongStart && !shortStartLongEnd && GeometryTools2D.contains(longer, shorter.getOrigin());
-        boolean endInside = !shortEndLongStart && !shortEndLongEnd && GeometryTools2D.contains(longer, shorter.getEndPoint());
-
-        if (startInside && endInside) {
+        if (isStartInside && isEndInside) {
             processInternalEdge(shorterEdge, longerEdge);
             return true;
         }
-        else if (startInside) {
-            // Either full overlap or coincident end point
-            if (shortEndLongStart) {
-                processCoincidentNode(shorterEdge, longerEdge, shorterEdge.getEnd());
-                return true;
-            }
-            else if (shortEndLongEnd) {
-                processCoincidentNode(shorterEdge, longerEdge, shorterEdge.getEnd());
-                return true;
-            }
-            else {
-                // Full overlap
-                processOverlap(shorterEdge, longerEdge);
-                return true;
-            }
+
+        if (isStartShared && isEndInside) {
+            processCoincidentNode(shorterEdge, longerEdge, shorterEdge.getStart());
+            return true;
         }
-        else if (endInside) {
-            // Either full overlap or coincident end point
-            if (shortStartLongStart) {
-                processCoincidentNode(shorterEdge, longerEdge, shorterEdge.getStart());
-                return true;
-            }
-            else if (shortStartLongEnd) {
-                processCoincidentNode(shorterEdge, longerEdge, shorterEdge.getStart());
-                return true;
-            }
-            else {
-                // Full overlap
-                processOverlap(shorterEdge, longerEdge);
-                return true;
-            }
+        if (isEndShared && isStartInside) {
+            processCoincidentNode(shorterEdge, longerEdge, shorterEdge.getEnd());
+            return true;
         }
+
+        if (isStartInside || isEndInside) {
+            processOverlap(shorterEdge, longerEdge);
+            return true;
+        }
+
         return false;
+    }
+
+    // Returns true if the point lies on the line segment, using a tolerance robust
+    // enough for diagonal lines.
+    private boolean containsRobust(final Line2D line, final Point2D point) {
+        if (GeometryTools2D.nearlyZero(line.getDirection().getX()) ||
+            GeometryTools2D.nearlyZero(line.getDirection().getY())) {
+            return GeometryTools2D.contains(line, point);
+        }
+
+        final double offsetX = point.getX() - line.getOrigin().getX();
+        final double offsetY = point.getY() - line.getOrigin().getY();
+        final double tx = offsetX / line.getDirection().getX();
+        final double ty = offsetY / line.getDirection().getY();
+
+        // Out of segment bounds.
+        if (tx < 0 || 1 < tx || ty < 0 || 1 < ty) return false;
+
+        return Math.abs(tx - ty) <= T_PARAMETER_TOLERANCE;
     }
 
     /**
