@@ -5,15 +5,12 @@ import rescuecore2.misc.geometry.Line2D;
 import rescuecore2.misc.geometry.Vector2D;
 import rescuecore2.misc.geometry.GeometryTools2D;
 import rescuecore2.misc.gui.ShapeDebugFrame;
-//import rescuecore2.log.Logger;
 
 import maps.gml.GMLMap;
 import maps.gml.GMLNode;
 import maps.gml.debug.GMLNodeShapeInfo;
 import maps.gml.GMLEdge;
 import maps.gml.debug.GMLEdgeShapeInfo;
-//import maps.gml.GMLFace;
-//import maps.gml.debug.GMLFaceShapeInfo;
 import maps.gml.GMLDirectedEdge;
 import maps.gml.GMLObject;
 import maps.gml.GMLRoad;
@@ -28,14 +25,10 @@ import maps.MapTools;
 
 import java.awt.geom.Area;
 import java.awt.geom.PathIterator;
-import java.util.Set;
-import java.util.List;
-import java.util.Collection;
-import java.util.ArrayList;
-import java.util.Arrays;
-import java.util.Iterator;
+import java.util.*;
 
 import java.awt.Color;
+import java.util.stream.Collectors;
 
 /**
    Useful tools for converting OSM to GML.
@@ -444,18 +437,6 @@ public final class ConvertTools {
         return nearlyEqual(getAnglesSum(building, map), CLOCKWISE_SUM, THRESHOLD);
     }
 
-    /*
-    private static double getAngle(GMLDirectedEdge a, GMLDirectedEdge b) {
-        Vector2D v1 = new Vector2D(a.getEndNode().getX() - a.getStartNode().getX(), a.getEndNode().getY() - a.getStartNode().getY());
-        Vector2D v2 = new Vector2D(b.getEndNode().getX() - b.getStartNode().getX(), b.getEndNode().getY() - b.getStartNode().getY());
-        double d = GeometryTools2D.getAngleBetweenVectors(v1, v2);
-        if (GeometryTools2D.isRightTurn(v1, v2)) {
-            return -d;
-        }
-        return d;
-    }
-    */
-
     private static double getAngle(long first, long second, long third, OSMMap map) {
         OSMNode n1 = map.getNode(first);
         OSMNode n2 = map.getNode(second);
@@ -573,6 +554,17 @@ public final class ConvertTools {
             last = current;
         }
         return areaSum / 2.0;
+    }
+
+    /**
+     * Collect all underlying {@code Edge} objects from a {@code TemporaryObject}'s direct edge list.
+     * @param object The object whose edges are collected.
+     * @return A set of edges in encounter order.
+     */
+    public static Set<Edge> collectEdges(final TemporaryObject object) {
+        return object.getEdges().stream()
+                .map(DirectedEdge::getEdge)
+                .collect(Collectors.toCollection(LinkedHashSet::new));
     }
 
 }
