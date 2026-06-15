@@ -440,8 +440,9 @@ public class TemporaryMap {
      * Split an edge into chunks.
      * @param edge        The edge to split.
      * @param splitPoints The nodes at which to split the edge.
+     * @return The list of replacement edges created by the split, or an empty list if no split occured.
      */
-    public void splitEdge(final Edge edge, final Collection<Node> splitPoints) {
+    public List<Edge> splitEdge(final Edge edge, final Collection<Node> splitPoints) {
         final List<Node> sorted = ConvertTools.sortedAlongEdge(edge, splitPoints);
 
         final List<Edge> replacements = new ArrayList<>();
@@ -461,16 +462,18 @@ public class TemporaryMap {
         }
 
         invalidateBoundsCache();
+        return Collections.unmodifiableList(replacements);
     }
 
     /**
      * Split an edge into chunks.
      * @param edge        The edge to split.
      * @param splitPoints The nodes at which to split the edge.
+     * @return The list of replacement edges created by the split, or an empty list if no split occured.
      * @see #splitEdge(Edge, Collection)
      */
-    public void splitEdge(Edge edge, Node... splitPoints) {
-        splitEdge(edge, Arrays.asList(splitPoints));
+    public List<Edge> splitEdge(Edge edge, Node... splitPoints) {
+        return splitEdge(edge, Arrays.asList(splitPoints));
     }
 
     private Node createNode(double x, double y) {
@@ -513,28 +516,47 @@ public class TemporaryMap {
         }
     }
 
+    /**
+     * Returns the bounding rectangle of all nodes in the map.
+     *
+     * <p>
+     * The result is cached after the first call. Call {@link #invalidateBoundsCache()}
+     * whenever nodes are added or removed to ensure the cached value is refreshed.
+     *
+     * <p>
+     * Width and height are guaranteed to be at least 1 meter, so that
+     * {@link SpatialGrid} never receives an empty rectangle and falls back to
+     * its dummy (no-op) mode.
+     *
+     * @return The bounding rectangle, or an empty {@link Rectangle2D} if the map has no nodes.
+     */
     public Rectangle2D getBounds() {
         if (this.cachedBounds != null) {
             return this.cachedBounds;
         }
 
-        Collection<Node> allNodes = getAllNodes();
+        final Collection<Node> allNodes = getAllNodes();
         if (allNodes.isEmpty()) {
             this.cachedBounds = new Rectangle2D.Double();
             return this.cachedBounds;
         }
 
         double minX = Double.MAX_VALUE, minY = Double.MAX_VALUE;
-        double maxX = Double.MIN_VALUE, maxY = Double.MIN_VALUE;
+        double maxX = -Double.MAX_VALUE, maxY = -Double.MAX_VALUE;
 
-        for (Node node : allNodes) {
+        for (final Node node : allNodes) {
             minX = Math.min(minX, node.getX());
             minY = Math.min(minY, node.getY());
             maxX = Math.max(maxX, node.getX());
             maxY = Math.max(maxY, node.getY());
         }
 
-        this.cachedBounds = new Rectangle2D.Double(minX, minY, maxX - minX, maxY - minY);
+        // Ensure with and height are least 1 meter so that SpatialGrid never
+        // receives an empty rectangle and fall back to its dummy (no-op) mode.
+        this.cachedBounds = new Rectangle2D.Double(
+                minX, minY,
+                Math.max(maxX - minX, 1.0),
+                Math.max(maxY - minY, 1.0));
         return this.cachedBounds;
     }
 
@@ -582,18 +604,12 @@ public class TemporaryMap {
     }
 
     /**
-     * Return {@code true} if the given point coincides with either endpoint of the edge
-     * within a tight tolerance suited for geometric intersection tests.
-     * @param point The point to test.
-     * @param edge  The edge to test against.
-     * @return True if the point is very close to either endpoint.
+     * Check whether an edge exists in the map.
+     * @param edge The edge to check.
+     * @return True if the edge exists in the map, false otherwise.
      */
-    public boolean isEndpointOfEdge(final Point2D point, final Edge edge) {
-        final double dx1 = Math.abs(point.getX() - edge.getStart().getX());
-        final double dy1 = Math.abs(point.getY() - edge.getStart().getY());
-        final double dx2 = Math.abs(point.getX() - edge.getEnd().getX());
-        final double dy2 = Math.abs(point.getY() - edge.getEnd().getY());
-        return (dx1 <= EXACT_THRESHOLD && dy1 <= EXACT_THRESHOLD)
-            || (dx2 <= EXACT_THRESHOLD && dy2 <= EXACT_THRESHOLD);
+    public boolean containsEdge(final Edge edge) {
+        return edges.contains(edge);
     }
+
 }
