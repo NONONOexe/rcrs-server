@@ -518,4 +518,25 @@ public final class ConvertTools {
         return !node.equals(edge.getStart()) || !node.equals(edge.getEnd());
     }
 
+    /**
+     * Sort nodes by their position along the given edge.
+     * @param edge  The edge defining the direction of sorting.
+     * @param nodes The nodes to sort.
+     * @return A new list of nodes sorted by t-parameter along the edge.
+     */
+    public static List<Node> sortedAlongEdge(final Edge edge, final Collection<Node> nodes) {
+        final double dx = edge.getLine().getDirection().getX();
+        final double dy = edge.getLine().getDirection().getY();
+        final double len2 = dx * dx + dy * dy;
+        final double ox = edge.getLine().getOrigin().getX();
+        final double oy = edge.getLine().getOrigin().getY();
+
+        return nodes.stream()
+                .sorted(Comparator.comparingDouble(n -> {
+                    // Project the node onto the edge direction to obtain a stable t-parameter.
+                    return ((n.getX() - ox) * dx + (n.getY() - oy) * dy) / len2;
+                }))
+                .toList();
+    }
+
 }
