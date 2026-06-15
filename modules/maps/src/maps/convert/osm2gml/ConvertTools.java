@@ -508,4 +508,14 @@ public final class ConvertTools {
             || map.isNear(point, edge.getEnd().getCoordinates());
     }
 
+    /**
+     * Return {@code true} if the given node is neither endpoint of the edge.
+     * @param node The node to test.
+     * @param edge The edge to test against.
+     * @return True if the node is not the start or end of the edge.
+     */
+    public static boolean isInteriorNode(final Node node, final Edge edge) {
+        return !node.equals(edge.getStart()) || !node.equals(edge.getEnd());
+    }
+
 }
