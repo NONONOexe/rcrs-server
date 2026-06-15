@@ -11,7 +11,6 @@ import maps.gml.GMLNode;
 import maps.gml.debug.GMLNodeShapeInfo;
 import maps.gml.GMLEdge;
 import maps.gml.debug.GMLEdgeShapeInfo;
-import maps.gml.GMLDirectedEdge;
 import maps.gml.GMLObject;
 import maps.gml.GMLRoad;
 import maps.gml.GMLBuilding;
@@ -71,48 +70,6 @@ public final class ConvertTools {
     */
     public static double nearbyThreshold(OSMMap map, double thresholdM) {
         return sizeOf1Metre(map) * thresholdM;
-    }
-
-    /**
-       Convert a GMLEdge to a Line2D.
-       @param edge The edge to convert.
-       @return A new Line2D.
-    */
-    public static Line2D gmlEdgeToLine(GMLEdge edge) {
-        GMLNode start = edge.getStart();
-        GMLNode end = edge.getEnd();
-        Point2D origin = new Point2D(start.getX(), start.getY());
-        Point2D endPoint = new Point2D(end.getX(), end.getY());
-        return new Line2D(origin, endPoint);
-    }
-
-    /**
-       Convert a GMLEdge to a Line2D.
-       @param edge The edge to convert.
-       @param start The node to start from. This must be one of the endpoints of the edge.
-       @return A new Line2D.
-    */
-    public static Line2D gmlEdgeToLine(GMLEdge edge, GMLNode start) {
-        if (!start.equals(edge.getStart()) && !start.equals(edge.getEnd())) {
-            throw new IllegalArgumentException("'start' must be one of the endpoints of 'edge'");
-        }
-        GMLNode end = start.equals(edge.getStart()) ? edge.getEnd() : edge.getStart();
-        Point2D origin = new Point2D(start.getX(), start.getY());
-        Point2D endPoint = new Point2D(end.getX(), end.getY());
-        return new Line2D(origin, endPoint);
-    }
-
-    /**
-       Convert a GMLDirectedEdge to a Line2D.
-       @param edge The edge to convert.
-       @return A new Line2D.
-    */
-    public static Line2D gmlDirectedEdgeToLine(GMLDirectedEdge edge) {
-        GMLNode start = edge.getStartNode();
-        GMLNode end = edge.getEndNode();
-        Point2D origin = new Point2D(start.getX(), start.getY());
-        Point2D endPoint = new Point2D(end.getX(), end.getY());
-        return new Line2D(origin, endPoint);
     }
 
     /**
@@ -274,14 +231,6 @@ public final class ConvertTools {
             if (object instanceof GMLEdge) {
                 allShapes.add(new GMLEdgeShapeInfo((GMLEdge)object, "Edges", Constants.BLACK, false));
             }
-            /*
-            if (object instanceof GMLFace) {
-                GMLFace face = (GMLFace)object;
-                Color c = Constants.TRANSPARENT_RED;
-                String name = "Unknown";
-                allShapes.add(new GMLFaceShapeInfo(face, "Faces", Constants.BLACK, Constants.TRANSPARENT_AQUA, false));
-            }
-            */
         }
         return allShapes;
     }
@@ -335,57 +284,6 @@ public final class ConvertTools {
     }
 
     /**
-       Find out if a set of GMLDirectedEdges is convex.
-       @param edges The set of edges to test.
-       @return True iff the face is convex.
-    */
-    public static boolean isConvex(List<DirectedEdge> edges) {
-        Iterator<DirectedEdge> it = edges.iterator();
-        Line2D first = it.next().getLine();
-        Line2D a = first;
-        Line2D b = it.next().getLine();
-        boolean rightTurn = GeometryTools2D.isRightTurn(a, b);
-        while (it.hasNext()) {
-            a = b;
-            b = it.next().getLine();
-            if (rightTurn != GeometryTools2D.isRightTurn(a, b)) {
-                return false;
-            }
-        }
-        if (rightTurn != GeometryTools2D.isRightTurn(b, first)) {
-            return false;
-        }
-        return true;
-    }
-
-    /**
-       Sum the angles of all turns in a GMLFace.
-       @param face The face to check.
-       @return The sum of angles in the face.
-    */
-    /*
-    public static double getAnglesSum(GMLFace face) {
-        double sum = 0;
-        Iterator<GMLDirectedEdge> it = face.getEdges().iterator();
-        GMLDirectedEdge first = it.next();
-        GMLDirectedEdge a = first;
-        while (it.hasNext()) {
-            GMLDirectedEdge b = it.next();
-            double d = getAngle(a, b);
-            if (!Double.isNaN(d)) {
-                sum += d;
-            }
-            a = b;
-        }
-        double d = getAngle(a, first);
-        if (!Double.isNaN(d)) {
-            sum += d;
-        }
-        return sum;
-    }
-    */
-
-    /**
        Sum the angles of all turns in an OSMBuilding.
        @param building The building to check.
        @param map The OSMMap the building is part of.
@@ -415,17 +313,6 @@ public final class ConvertTools {
         }
         return sum;
     }
-
-    /**
-       Find out if a GMLFace is defined clockwise or not.
-       @param face The GMLFace to check.
-       @return True if the face is defined clockwise, false if anti-clockwise.
-    */
-    /*
-    public static boolean isClockwise(GMLFace face) {
-        return nearlyEqual(getAnglesSum(face), CLOCKWISE_SUM, THRESHOLD);
-    }
-    */
 
     /**
        Find out if an OSMBuilding is defined clockwise or not.
@@ -548,7 +435,7 @@ public final class ConvertTools {
     private static double calculatePathSignedArea(List<Point2D> path) {
         if (path.size() < 3) return 0.0;
         double areaSum = 0.0;
-        Point2D last = path.get(path.size() - 1);
+        Point2D last = path.getLast();
         for (Point2D current : path) {
             areaSum += (last.getX() * current.getY()) - (current.getX() * last.getY());
             last = current;
@@ -565,6 +452,60 @@ public final class ConvertTools {
         return object.getEdges().stream()
                 .map(DirectedEdge::getEdge)
                 .collect(Collectors.toCollection(LinkedHashSet::new));
+    }
+
+    /**
+     * Find the intersection point between two edges, handling near-miss cases where
+     * the intersection lies just outside a segment due to floating-point error.
+     * Returns {@code null} if no intersection exists or if it coincides with an endpoint of either edge.
+     * @param first  The first edge.
+     * @param second The second edge.
+     * @param map    The map providing the nearby threshold.
+     * @return The intersection point, or null if none exists.
+     */
+    public static Point2D findInteriorIntersection(
+            final Edge first, final Edge second, final TemporaryMap map) {
+        if (GeometryTools2D.parallel(first.getLine(), second.getLine())) {
+            return null;
+        }
+
+        Point2D intersection =
+                GeometryTools2D.getSegmentIntersectionPoint(first.getLine(), second.getLine());
+
+        // Fall back to infinite-line intersection for near-miss cases.
+        if (intersection == null) {
+            final Point2D candidate =
+                    GeometryTools2D.getIntersectionPoint(first.getLine(), second.getLine());
+            if (candidate == null) {
+                return null;
+            }
+            final boolean nearFirst  = isEndpoint(candidate, first, map);
+            final boolean nearSecond = isEndpoint(candidate, second, map);
+            if (!nearFirst && !nearSecond) {
+                return null;
+            }
+            intersection = candidate;
+        }
+
+        // Discard if the intersection coincides with an endpoint of either edge.
+        if (isEndpoint(intersection, first, map) || isEndpoint(intersection, second, map)) {
+            return null;
+        }
+
+        return intersection;
+    }
+
+    /**
+     * Return {@code true} if the given point coincides (within the map's nearby threshold)
+     * with either endpoint of edge.
+     * @param point The point to test.
+     * @param edge  The edge to test against.
+     * @param map   The map providing the nearby threshold.
+     * @return True if the point is near either endpoint.
+     */
+    public static boolean isEndpoint(Point2D point, final Edge edge, TemporaryMap map) {
+        return map.isNear(point, edge.getStart().getCoordinates())
+            || map.isNear(point, edge.getEnd().getCoordinates());
     }
 
 }
