@@ -262,7 +262,7 @@ public class TemporaryMap {
      * @return All passable shapes.
      */
     public Collection<TemporaryObject> getAllPassableShapes() {
-        List<TemporaryObject> passable = new ArrayList<>();
+        final List<TemporaryObject> passable = new ArrayList<>();
         passable.addAll(tempRoads);
         passable.addAll(tempIntersections);
         return passable;
@@ -424,17 +424,17 @@ public class TemporaryMap {
     }
 
     /**
-       Split an edge into chunks.
-       @param edge The edge to split.
-       @param splitPoints The points to split the line. These must be in order along the line.
-       @return The replacement edges.
-    */
-    public List<Edge> splitEdge(Edge edge, Node... splitPoints) {
-        List<Edge> replacements = new ArrayList<Edge>();
+     * Split an edge into chunks.
+     * @param edge        The edge to split.
+     * @param splitPoints The nodes at which to split the edge.
+     */
+    public void splitEdge(final Edge edge, final Collection<Node> splitPoints) {
+        final List<Node> sorted = ConvertTools.sortedAlongEdge(edge, splitPoints);
+
+        final List<Edge> replacements = new ArrayList<>();
         Edge current = edge;
-        for (Node n : splitPoints) {
+        for (final Node n :  sorted) {
             if (n.equals(current.getStart()) || n.equals(current.getEnd())) {
-                // Don't bother if the split point is at the origin or endpoint
                 continue;
             }
             replacements.add(getEdge(current.getStart(), n));
@@ -448,8 +448,16 @@ public class TemporaryMap {
         }
 
         invalidateBoundsCache();
+    }
 
-        return replacements;
+    /**
+     * Split an edge into chunks.
+     * @param edge        The edge to split.
+     * @param splitPoints The nodes at which to split the edge.
+     * @see #splitEdge(Edge, Collection)
+     */
+    public void splitEdge(Edge edge, Node... splitPoints) {
+        splitEdge(edge, Arrays.asList(splitPoints));
     }
 
     private Node createNode(double x, double y) {
