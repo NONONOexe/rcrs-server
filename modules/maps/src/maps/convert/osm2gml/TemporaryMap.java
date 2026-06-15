@@ -18,6 +18,8 @@ public class TemporaryMap {
     */
     private static final double NEARBY_THRESHOLD_M = 1;
 
+    private static final double EXACT_THRESHOLD = 1e-10;
+
     private double threshold;
 
     private Set<Node> nodes;
@@ -377,6 +379,17 @@ public class TemporaryMap {
         return createNode(x, y);
     }
 
+    public Node getNodeExact(final double x, final double y) {
+        for (final Node next : nodes) {
+            final double dx = next.getX() - x;
+            final double dy = next.getY() - y;
+            if (Math.abs(dx) <= EXACT_THRESHOLD && Math.abs(dy) <= EXACT_THRESHOLD) {
+                return next;
+            }
+        }
+        return createNode(x, y);
+    }
+
     /**
        Get an Edge between two nodes. This will return either a new Edge or a shared instance if one already exists.
        @param from The from node.
@@ -485,13 +498,6 @@ public class TemporaryMap {
         }
     }
 
-    private void removeNode(Node n) {
-        nodes.remove(n);
-        edgesAtNode.remove(n);
-
-        invalidateBoundsCache();
-    }
-
     private void removeEdge(Edge e) {
         edges.remove(e);
         edgesAtNode.get(e.getStart()).remove(e);
@@ -573,5 +579,21 @@ public class TemporaryMap {
 
         // Invalidate the bounds cache as the node set has changed.
         invalidateBoundsCache();
+    }
+
+    /**
+     * Return {@code true} if the given point coincides with either endpoint of the edge
+     * within a tight tolerance suited for geometric intersection tests.
+     * @param point The point to test.
+     * @param edge  The edge to test against.
+     * @return True if the point is very close to either endpoint.
+     */
+    public boolean isEndpointOfEdge(final Point2D point, final Edge edge) {
+        final double dx1 = Math.abs(point.getX() - edge.getStart().getX());
+        final double dy1 = Math.abs(point.getY() - edge.getStart().getY());
+        final double dx2 = Math.abs(point.getX() - edge.getEnd().getX());
+        final double dy2 = Math.abs(point.getY() - edge.getEnd().getY());
+        return (dx1 <= EXACT_THRESHOLD && dy1 <= EXACT_THRESHOLD)
+            || (dx2 <= EXACT_THRESHOLD && dy2 <= EXACT_THRESHOLD);
     }
 }

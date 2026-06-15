@@ -27,7 +27,6 @@ import java.awt.geom.PathIterator;
 import java.util.*;
 
 import java.awt.Color;
-import java.util.stream.Collectors;
 
 /**
    Useful tools for converting OSM to GML.
@@ -360,12 +359,12 @@ public final class ConvertTools {
 
                 if (type == PathIterator.SEG_MOVETO) {
                     // This is the start of a new path. Initialize the start/end nodes.
-                    firstNode = map.getNode(coords[0], coords[1]);
+                    firstNode = map.getNodeExact(coords[0], coords[1]);
                     lastNode = firstNode;
                 }
                 else if (type == PathIterator.SEG_LINETO) {
                     // Add a segment to the current path.
-                    Node nextNode = map.getNode(coords[0], coords[1]);
+                    Node nextNode = map.getNodeExact(coords[0], coords[1]);
                     if (lastNode != null && !lastNode.equals(nextNode)) {
                         currentPath.add(map.getDirectedEdge(lastNode, nextNode));
                     }
@@ -441,81 +440,6 @@ public final class ConvertTools {
             last = current;
         }
         return areaSum / 2.0;
-    }
-
-    /**
-     * Collect all underlying {@code Edge} objects from a {@code TemporaryObject}'s direct edge list.
-     * @param object The object whose edges are collected.
-     * @return A set of edges in encounter order.
-     */
-    public static Set<Edge> collectEdges(final TemporaryObject object) {
-        return object.getEdges().stream()
-                .map(DirectedEdge::getEdge)
-                .collect(Collectors.toCollection(LinkedHashSet::new));
-    }
-
-    /**
-     * Find the intersection point between two edges, handling near-miss cases where
-     * the intersection lies just outside a segment due to floating-point error.
-     * Returns {@code null} if no intersection exists or if it coincides with an endpoint of either edge.
-     * @param first  The first edge.
-     * @param second The second edge.
-     * @param map    The map providing the nearby threshold.
-     * @return The intersection point, or null if none exists.
-     */
-    public static Point2D findInteriorIntersection(
-            final Edge first, final Edge second, final TemporaryMap map) {
-        if (GeometryTools2D.parallel(first.getLine(), second.getLine())) {
-            return null;
-        }
-
-        Point2D intersection =
-                GeometryTools2D.getSegmentIntersectionPoint(first.getLine(), second.getLine());
-
-        // Fall back to infinite-line intersection for near-miss cases.
-        if (intersection == null) {
-            final Point2D candidate =
-                    GeometryTools2D.getIntersectionPoint(first.getLine(), second.getLine());
-            if (candidate == null) {
-                return null;
-            }
-            final boolean nearFirst  = isEndpoint(candidate, first, map);
-            final boolean nearSecond = isEndpoint(candidate, second, map);
-            if (!nearFirst && !nearSecond) {
-                return null;
-            }
-            intersection = candidate;
-        }
-
-        // Discard if the intersection coincides with an endpoint of either edge.
-        if (isEndpoint(intersection, first, map) || isEndpoint(intersection, second, map)) {
-            return null;
-        }
-
-        return intersection;
-    }
-
-    /**
-     * Return {@code true} if the given point coincides (within the map's nearby threshold)
-     * with either endpoint of edge.
-     * @param point The point to test.
-     * @param edge  The edge to test against.
-     * @param map   The map providing the nearby threshold.
-     * @return True if the point is near either endpoint.
-     */
-    public static boolean isEndpoint(Point2D point, final Edge edge, TemporaryMap map) {
-        return map.isNear(point, edge.getStart().getCoordinates())
-            || map.isNear(point, edge.getEnd().getCoordinates());
-    }
-
-    /**
-     * Return {@code true} if the given node is neither endpoint of the edge.
-     * @param node The node to test.
-     * @param edge The edge to test against.
-     * @return True if the node is not the start or end of the edge.
-     */
-    public static boolean isInteriorNode(final Node node, final Edge edge) {
-        return !node.equals(edge.getStart()) || !node.equals(edge.getEnd());
     }
 
     /**
