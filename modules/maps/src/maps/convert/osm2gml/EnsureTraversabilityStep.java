@@ -11,18 +11,20 @@ import java.util.ArrayList;
 import java.util.Collection;
 import java.util.Collections;
 import java.util.List;
+import java.util.function.Predicate;
 
 /**
  * This step modify the map so that all shapes are traversable from their centroid.
  */
 public class EnsureTraversabilityStep extends BaseModificationStep {
     private final double threshold;
+    private final List<ShapeDebugFrame.ShapeInfo> debugElements;
 
     public EnsureTraversabilityStep(TemporaryMap map) {
         super(map);
         threshold = ConvertTools.sizeOfMeters(map.getOSMMap(), 1);
+        debugElements = new ArrayList<>();
     }
-
 
     @Override
     public String getDescription() {
@@ -31,36 +33,31 @@ public class EnsureTraversabilityStep extends BaseModificationStep {
 
     @Override
     protected void step() {
-        final List<ShapeDebugFrame.ShapeInfo> debugShapes = new ArrayList<>();
         final Collection<TemporaryObject> allObjects = map.getAllObjects();
 
-        for (final TemporaryObject object : allObjects) {
-            debugShapes.add(DebugShapeFactory.createOutlineInfo(object));
-            debugShapes.add(DebugShapeFactory.createCentroidInfo(object));
-        }
+        debugElements.addAll(DebugElementFactory.createPolygonDebugElements(allObjects));
+        debugElements.addAll(DebugElementFactory.createCentroidDebugElements(allObjects));
 
-        debug.show("Centroids Visualization", debugShapes);
+        final Collection<TemporaryObject> targets = allObjects.stream()
+                .filter(Predicate.not(this::isTraversable))
+                .toList();
+
+        setProgressLimit(targets.size());
+
+        debug.show("Target Objects", debugElements);
 
         // ----
 
         int totalSplits = 0;
-        Collection<TemporaryObject> initialAllObjects = map.getAllObjects();
+
         List<TemporaryObject> modifiedShapes = new ArrayList<>();
         List<TemporaryObject> addedShapes = new ArrayList<>();
 
-        setProgressLimit(initialAllObjects.size());
-
-        for (TemporaryObject object : initialAllObjects) {
-
-            // Check if centroid can reach passable edges.
-            if (isTraversable(object)) {
-                bumpProgress();
-                continue;
-            }
+        for (final TemporaryObject target : targets) {
 
             ArrayDeque<TemporaryObject> toProcess = new ArrayDeque<>();
-            toProcess.offer(object);
-            modifiedShapes.add(object);
+            toProcess.offer(target);
+            modifiedShapes.add(target);
 
             while (!toProcess.isEmpty()) {
                 TemporaryObject current = toProcess.poll();
@@ -89,28 +86,27 @@ public class EnsureTraversabilityStep extends BaseModificationStep {
         visualizeDifference(modifiedShapes, addedShapes, "Splitting polygon");
     }
 
+    //
     private boolean isTraversable(final TemporaryObject object) {
         // Skip shapes with fewer than 4 edges; triangles are always traversable.
         final List<DirectedEdge> edges = object.getEdges();
         if (edges.size() < 4) return true;
 
         // Separate edges into passable and impassable.
-        final List<Line2D> passableLines   = new ArrayList<>();
-        final List<Line2D> impassableLines = new ArrayList<>();
+        final List<Line2D> passableLines = new ArrayList<>();
+        final List<Line2D> blockedLines  = new ArrayList<>();
         for (final DirectedEdge directedEdge : edges) {
             final boolean isEdgeShared = 1 < map.getAttachedObjects(directedEdge.getEdge()).size();
-            if (isEdgeShared) {
-                passableLines.add(directedEdge.getLine());
-            } else {
-                impassableLines.add(directedEdge.getLine());
-            }
+            (isEdgeShared ? passableLines : blockedLines).add(directedEdge.getLine());
         }
 
+        // ...
         final Point2D centroid = object.getCentroid();
         for (final Line2D line : passableLines) {
             final Point2D edgeCenter = line.getPoint(0.5);
             final Line2D traversalLine = new Line2D(centroid, edgeCenter);
-            final boolean isBlocked = !intersectsAny(traversalLine, impassableLines);
+            final boolean isBlocked = intersectsAny(traversalLine, blockedLines);
+            debugElements.add(DebugElementFactory.createTraversalLineInfo(traversalLine, !isBlocked));
             if (isBlocked) return false;
         }
 
