@@ -4,6 +4,7 @@ import rescuecore2.misc.geometry.GeometryTools2D;
 import rescuecore2.misc.geometry.Line2D;
 import rescuecore2.misc.geometry.Point2D;
 import rescuecore2.misc.geometry.Vector2D;
+import rescuecore2.misc.gui.ShapeDebugFrame;
 
 import java.util.ArrayDeque;
 import java.util.ArrayList;
@@ -30,6 +31,18 @@ public class EnsureTraversabilityStep extends BaseModificationStep {
 
     @Override
     protected void step() {
+        final List<ShapeDebugFrame.ShapeInfo> debugShapes = new ArrayList<>();
+        final Collection<TemporaryObject> allObjects = map.getAllObjects();
+
+        for (final TemporaryObject object : allObjects) {
+            debugShapes.add(DebugShapeFactory.createOutlineInfo(object));
+            debugShapes.add(DebugShapeFactory.createCentroidInfo(object));
+        }
+
+        debug.show("Centroids Visualization", debugShapes);
+
+        // ----
+
         int totalSplits = 0;
         Collection<TemporaryObject> initialAllObjects = map.getAllObjects();
         List<TemporaryObject> modifiedShapes = new ArrayList<>();
@@ -40,7 +53,7 @@ public class EnsureTraversabilityStep extends BaseModificationStep {
         for (TemporaryObject object : initialAllObjects) {
 
             // Check if centroid can reach passable edges.
-            if (isValidObject(object)) {
+            if (isTraversable(object)) {
                 bumpProgress();
                 continue;
             }
@@ -55,7 +68,7 @@ public class EnsureTraversabilityStep extends BaseModificationStep {
                 totalSplits++;
 
                 for (TemporaryObject newObject : newShapes) {
-                    if (isValidObject(newObject)) {
+                    if (isTraversable(newObject)) {
                         addedShapes.add(newObject);
                     } else {
                         toProcess.push(newObject);
@@ -76,30 +89,29 @@ public class EnsureTraversabilityStep extends BaseModificationStep {
         visualizeDifference(modifiedShapes, addedShapes, "Splitting polygon");
     }
 
-    private boolean isValidObject(TemporaryObject object) {
-        Point2D centroid = object.getCentroid();
-
+    private boolean isTraversable(final TemporaryObject object) {
         // Skip shapes with fewer than 4 edges; triangles are always traversable.
-        List<DirectedEdge> edges = object.getEdges();
+        final List<DirectedEdge> edges = object.getEdges();
         if (edges.size() < 4) return true;
 
         // Separate edges into passable and impassable.
-        List<Line2D> passableLines = new ArrayList<>();
-        List<Line2D> impassableLines = new ArrayList<>();
-        for (DirectedEdge directedEdge : object.getEdges()) {
-            int attachedCount = map.getAttachedObjects(directedEdge.getEdge()).size();
-            if (1 < attachedCount) {
+        final List<Line2D> passableLines   = new ArrayList<>();
+        final List<Line2D> impassableLines = new ArrayList<>();
+        for (final DirectedEdge directedEdge : edges) {
+            final boolean isEdgeShared = 1 < map.getAttachedObjects(directedEdge.getEdge()).size();
+            if (isEdgeShared) {
                 passableLines.add(directedEdge.getLine());
             } else {
                 impassableLines.add(directedEdge.getLine());
             }
         }
 
-        for (Line2D line : passableLines) {
-            Point2D edgeCentre = line.getPoint(0.5);
-            Line2D lineOfSight = new Line2D(centroid, edgeCentre);
-            boolean intersects = intersectsAny(lineOfSight, impassableLines);
-            if (intersects) return false;
+        final Point2D centroid = object.getCentroid();
+        for (final Line2D line : passableLines) {
+            final Point2D edgeCenter = line.getPoint(0.5);
+            final Line2D traversalLine = new Line2D(centroid, edgeCenter);
+            final boolean isBlocked = !intersectsAny(traversalLine, impassableLines);
+            if (isBlocked) return false;
         }
 
         return true;
