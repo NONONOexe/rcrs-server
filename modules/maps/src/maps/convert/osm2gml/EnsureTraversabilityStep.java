@@ -1,6 +1,5 @@
 package maps.convert.osm2gml;
 
-import maps.convert.osm2gml.buildings.PolygonTriangular;
 import rescuecore2.misc.geometry.GeometryTools2D;
 import rescuecore2.misc.geometry.Line2D;
 import rescuecore2.misc.geometry.Point2D;
@@ -52,32 +51,32 @@ public class EnsureTraversabilityStep extends BaseModificationStep {
             // Decompose the non-traversable polygon into a set of convex triangles.
             final List<List<Point2D>> pieces = PolygonTriangular.triangulate(vertices);
 
-//            boolean mergedAnything = true;
-//            while (mergedAnything && 1 < pieces.size()) {
-//                mergedAnything = false;
-//
-//                // Iteratively test all pairs pieces to find mergeable adjacent polygons.
-//                for (int i = 0; i < pieces.size(); i++) {
-//                    for (int j = i + 1; j < pieces.size(); j++) {
-//                        final List<Point2D> p1 = pieces.get(i);
-//                        final List<Point2D> p2 = pieces.get(j);
-//
-//                        // Attempt to merge the two pieces if they share exactly one edge.
-//                        final List<Point2D> merged = tryMerge(p1, p2);
-//                        if (merged == null) continue;
-//
-//                        // Keep the merged shape and discard the original two if the new shape is traversable.
-//                        if (isTraversable(merged, impassableLines)) {
-//                            pieces.remove(j);
-//                            pieces.remove(i);
-//                            pieces.add(merged);
-//                            mergedAnything = true;
-//                            break;
-//                        }
-//                    }
-//                    if (mergedAnything) break;
-//                }
-//            }
+            boolean mergedAnything = true;
+            while (mergedAnything && 1 < pieces.size()) {
+                mergedAnything = false;
+
+                // Iteratively test all pairs pieces to find mergeable adjacent polygons.
+                for (int i = 0; i < pieces.size(); i++) {
+                    for (int j = i + 1; j < pieces.size(); j++) {
+                        final List<Point2D> p1 = pieces.get(i);
+                        final List<Point2D> p2 = pieces.get(j);
+
+                        // Attempt to merge the two pieces if they share exactly one edge.
+                        final List<Point2D> merged = tryMerge(p1, p2);
+                        if (merged == null) continue;
+
+                        // Keep the merged shape and discard the original two if the new shape is traversable.
+                        if (isTraversable(merged, impassableLines)) {
+                            pieces.remove(j);
+                            pieces.remove(i);
+                            pieces.add(merged);
+                            mergedAnything = true;
+                            break;
+                        }
+                    }
+                    if (mergedAnything) break;
+                }
+            }
 
             // Replace the original object with the newly formed traversable sub-shapes.
             if (1 < pieces.size()) {
@@ -169,7 +168,7 @@ public class EnsureTraversabilityStep extends BaseModificationStep {
             final TemporaryObject original, final List<Point2D> vertices) {
         if (vertices.size() < 3) return null;
 
-        final List<Node> pieceNodes = vertices.stream().map(map::getNode).toList();
+        final List<Node> pieceNodes = vertices.stream().map(map::getNodeExact).toList();
         final List<DirectedEdge> pieceEdges = new ArrayList<>();
         for (int i = 0; i < vertices.size(); i++) {
             final Node start = pieceNodes.get(i);

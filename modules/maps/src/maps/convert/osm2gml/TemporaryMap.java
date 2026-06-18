@@ -390,6 +390,10 @@ public class TemporaryMap {
         return createNode(x, y);
     }
 
+    public Node getNodeExact(final Point2D p) {
+        return getNodeExact(p.getX(), p.getY());
+    }
+
     /**
        Get an Edge between two nodes. This will return either a new Edge or a shared instance if one already exists.
        @param from The from node.
