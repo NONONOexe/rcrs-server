@@ -1,29 +1,28 @@
 package maps.convert.osm2gml;
 
+import maps.convert.osm2gml.buildings.PolygonTriangular;
 import rescuecore2.misc.geometry.GeometryTools2D;
 import rescuecore2.misc.geometry.Line2D;
 import rescuecore2.misc.geometry.Point2D;
-import rescuecore2.misc.geometry.Vector2D;
-import rescuecore2.misc.gui.ShapeDebugFrame;
 
-import java.util.ArrayDeque;
 import java.util.ArrayList;
 import java.util.Collection;
-import java.util.Collections;
 import java.util.List;
-import java.util.function.Predicate;
 
 /**
  * This step modify the map so that all shapes are traversable from their centroid.
  */
 public class EnsureTraversabilityStep extends BaseModificationStep {
     private final double threshold;
-    private final List<ShapeDebugFrame.ShapeInfo> debugElements;
 
-    public EnsureTraversabilityStep(TemporaryMap map) {
+    /**
+     * Constructs a new {@link EnsureTraversabilityStep}.
+     *
+     * @param map The {@link TemporaryMap} to be modified.
+     */
+    public EnsureTraversabilityStep(final TemporaryMap map) {
         super(map);
         threshold = ConvertTools.sizeOfMeters(map.getOSMMap(), 1);
-        debugElements = new ArrayList<>();
     }
 
     @Override
@@ -35,288 +34,176 @@ public class EnsureTraversabilityStep extends BaseModificationStep {
     protected void step() {
         final Collection<TemporaryObject> allObjects = map.getAllObjects();
 
-        debugElements.addAll(DebugElementFactory.createPolygonDebugElements(allObjects));
-        debugElements.addAll(DebugElementFactory.createCentroidDebugElements(allObjects));
+        final List<TemporaryObject> shapesToRemove = new ArrayList<>();
+        final List<TemporaryObject> shapesToAdd    = new ArrayList<>();
 
-        final Collection<TemporaryObject> targets = allObjects.stream()
-                .filter(Predicate.not(this::isTraversable))
-                .toList();
+        setProgressLimit(allObjects.size());
 
-        setProgressLimit(targets.size());
+        for (final TemporaryObject object : allObjects) {
+            final List<Point2D> vertices = object.getVertices();
+            final List<Line2D> impassableLines = getImpassableLines(object);
 
-        debug.show("Target Objects", debugElements);
-
-        // ----
-
-        int totalSplits = 0;
-
-        List<TemporaryObject> modifiedShapes = new ArrayList<>();
-        List<TemporaryObject> addedShapes = new ArrayList<>();
-
-        for (final TemporaryObject target : targets) {
-
-            ArrayDeque<TemporaryObject> toProcess = new ArrayDeque<>();
-            toProcess.offer(target);
-            modifiedShapes.add(target);
-
-            while (!toProcess.isEmpty()) {
-                TemporaryObject current = toProcess.poll();
-                List<TemporaryObject> newShapes = splitObject(current);
-                totalSplits++;
-
-                for (TemporaryObject newObject : newShapes) {
-                    if (isTraversable(newObject)) {
-                        addedShapes.add(newObject);
-                    } else {
-                        toProcess.push(newObject);
-                    }
-                }
+            // Check if the original polygon is already fully traversable.
+            if (isTraversable(vertices, impassableLines)) {
+                bumpProgress();
+                continue;
             }
 
+            // Decompose the non-traversable polygon into a set of convex triangles.
+            final List<List<Point2D>> pieces = PolygonTriangular.triangulate(vertices);
+
+//            boolean mergedAnything = true;
+//            while (mergedAnything && 1 < pieces.size()) {
+//                mergedAnything = false;
+//
+//                // Iteratively test all pairs pieces to find mergeable adjacent polygons.
+//                for (int i = 0; i < pieces.size(); i++) {
+//                    for (int j = i + 1; j < pieces.size(); j++) {
+//                        final List<Point2D> p1 = pieces.get(i);
+//                        final List<Point2D> p2 = pieces.get(j);
+//
+//                        // Attempt to merge the two pieces if they share exactly one edge.
+//                        final List<Point2D> merged = tryMerge(p1, p2);
+//                        if (merged == null) continue;
+//
+//                        // Keep the merged shape and discard the original two if the new shape is traversable.
+//                        if (isTraversable(merged, impassableLines)) {
+//                            pieces.remove(j);
+//                            pieces.remove(i);
+//                            pieces.add(merged);
+//                            mergedAnything = true;
+//                            break;
+//                        }
+//                    }
+//                    if (mergedAnything) break;
+//                }
+//            }
+
+            // Replace the original object with the newly formed traversable sub-shapes.
+            if (1 < pieces.size()) {
+                shapesToRemove.add(object);
+                for (final List<Point2D> pieceVertices : pieces) {
+                    final TemporaryObject newObject = createTemporaryObjectFromVertices(object, pieceVertices);
+                    shapesToAdd.add(newObject);
+                }
+            }
             bumpProgress();
         }
 
-        if (!modifiedShapes.isEmpty()) {
-            for (TemporaryObject object : modifiedShapes) map.removeTemporaryObject(object);
-            for (TemporaryObject object : addedShapes) map.addTemporaryObject(object);
-            map.resynchronizeStateFromObjects();
-        }
+        shapesToRemove.forEach(map::removeTemporaryObject);
+        shapesToAdd.forEach(map::addTemporaryObject);
+        map.resynchronizeStateFromObjects();
 
-        setStatus("Split " + totalSplits + " objects.");
-        visualizeDifference(modifiedShapes, addedShapes, "Splitting polygon");
+        setStatus("Split " + shapesToRemove.size() + " objects into " + shapesToAdd.size() + " traversable sub-shapes");
+        visualizeDifference(shapesToRemove, shapesToAdd, "Ensure Traversability (Split Polygons)");
     }
 
-    //
-    private boolean isTraversable(final TemporaryObject object) {
-        // Skip shapes with fewer than 4 edges; triangles are always traversable.
-        final List<DirectedEdge> edges = object.getEdges();
-        if (edges.size() < 4) return true;
+    // Extracts the boundary lines that are shared with other objects and cannot be crossed.
+    private List<Line2D> getImpassableLines(final TemporaryObject object) {
+        return object.getEdges().stream()
+                .filter(edge -> 1 < map.getAttachedObjects(edge.getEdge()).size())
+                .map(DirectedEdge::getLine)
+                .toList();
+    }
 
-        // Separate edges into passable and impassable.
-        final List<Line2D> passableLines = new ArrayList<>();
-        final List<Line2D> blockedLines  = new ArrayList<>();
-        for (final DirectedEdge directedEdge : edges) {
-            final boolean isEdgeShared = 1 < map.getAttachedObjects(directedEdge.getEdge()).size();
-            (isEdgeShared ? passableLines : blockedLines).add(directedEdge.getLine());
-        }
+    // Checks if a polygon is traversable from its centroid to its passable edges.
+    private boolean isTraversable(final List<Point2D> vertices, final List<Line2D> impassableLines) {
 
-        // ...
-        final Point2D centroid = object.getCentroid();
-        for (final Line2D line : passableLines) {
-            final Point2D edgeCenter = line.getPoint(0.5);
-            final Line2D traversalLine = new Line2D(centroid, edgeCenter);
-            final boolean isBlocked = intersectsAny(traversalLine, blockedLines);
-            debugElements.add(DebugElementFactory.createTraversalLineInfo(traversalLine, !isBlocked));
-            if (isBlocked) return false;
+        // Triangles are always convex and thus fully traversable.
+        if (vertices.size() < 4) return true;
+
+        // Check the traversal from the centroid to each edge.
+        final Point2D centroid = GeometryTools2D.computeCentroid(vertices);
+        for (int i = 0; i < vertices.size(); i++) {
+            final Point2D p1 = vertices.get(i);
+            final Point2D p2 = vertices.get((i + 1) % vertices.size());
+            final Line2D line = new Line2D(p1, p2);
+
+            // Skip edges that are already defines as impassable walls.
+            if (impassableLines.contains(line)) continue;
+
+            final Point2D edgeCenter = line.getMidpoint();
+            final Line2D traversalLine =  new Line2D(centroid, edgeCenter);
+
+            // The shape is not traversable if the path crosses an impassable line.
+            if (intersectsAny(traversalLine, impassableLines)) return false;
         }
 
         return true;
     }
 
-    private List<TemporaryObject> splitObject(final TemporaryObject object) {
-        final List<Point2D> concavePoints = findConcaveVertices(object.getVertices());
-        final List<Line2D> splitLines = generateSplitLines(object, concavePoints);
-        if (splitLines.isEmpty()) return Collections.emptyList();
+    // Attempts to merge two polygons into one if they share exactly one oppositely directed edge.
+    private List<Point2D> tryMerge(final List<Point2D> p1, final List<Point2D> p2) {
+        for (int i = 0; i < p1.size(); i++) {
+            final Point2D a1 = p1.get(i);
+            final Point2D b1 = p1.get((i + 1) % p1.size());
 
-        double minConcaveCount = concavePoints.size() + 1;
-        Line2D bestSplitLine = null;
-        for (final Line2D line : splitLines) {
-            final List<Point2D> polygon = object.getVertices();
-            final Point2D point1 = line.getOrigin();
-            final Point2D point2 = line.getEndPoint();
-            final List<List<Point2D>> splitPolygons = splitPolygon(polygon, point1, point2);
-            if (splitPolygons.size() != 2) continue;
+            for (int j = 0; j < p2.size(); j++) {
+                final Point2D a2 = p2.get(j);
+                final Point2D b2 = p2.get((j + 1) % p2.size());
 
-            // Skip this line if it crosses any edge of the polygon.
-            final boolean crossesEdge = object.getLines().stream().anyMatch(edge -> crosses(edge, line));
-            if (crossesEdge) continue;
+                // Check if the edges are identical but in opposite directions.
+                if (a1.equals(b2) && b1.equals(a2)) {
+                    final List<Point2D> merged = new ArrayList<>();
 
-            // Skip this line if it extends outside the original polygon.
-            final double totalArea = GeometryTools2D.computeArea(polygon);
-            final double area1 = GeometryTools2D.computeArea(splitPolygons.get(0));
-            final double area2 = GeometryTools2D.computeArea(splitPolygons.get(1));
-            final double areaError = area1 + area2 - totalArea;
-            if (threshold * threshold < areaError) continue;
+                    for (int k = 0; k < p1.size(); k++) {
+                        final Point2D p = p1.get((i + 1 + k) % p1.size());
+                        merged.add(p);
 
-            final int concave1 = findConcaveVertices(splitPolygons.get(0)).size();
-            final int concave2 = findConcaveVertices(splitPolygons.get(1)).size();
-            final int totalConcaveCount = concave1 + concave2;
-            if (totalConcaveCount < minConcaveCount) {
-                minConcaveCount = totalConcaveCount;
-                bestSplitLine = line;
+                        if (p.equals(a1)) {
+                            for (int l = 1; l < p2.size() - 1; l++) {
+                                merged.add(p2.get((j + 1 + l) % p2.size()));
+                            }
+                        }
+                    }
+                    return merged;
+                }
             }
         }
-
-        if (bestSplitLine == null) return Collections.emptyList();
-
-        Node startNode = findNode(object, bestSplitLine.getOrigin());
-        Node endNode = findNode(object, bestSplitLine.getEndPoint());
-
-        if (startNode == null || endNode == null) return Collections.emptyList();
-
-        return splitObject(object, startNode, endNode);
+        return null;
     }
 
-    private Node findNode(TemporaryObject object, Point2D point) {
-        List<Node> nodes = object.getNodes();
-        Node closest = null;
-        double minDist = Double.MAX_VALUE;
+    // Reconstructs a TemporaryObjects from a point list by reusing existing nodes or
+    // creating new internal edges.
+    private TemporaryObject createTemporaryObjectFromVertices(
+            final TemporaryObject original, final List<Point2D> vertices) {
+        if (vertices.size() < 3) return null;
 
-        for (Node node : nodes) {
-            double dist = GeometryTools2D.getDistance(node.getCoordinates(), point);
-            if (dist < minDist) {
-                minDist = dist;
-                closest = node;
-            }
+        final List<Node> pieceNodes = vertices.stream().map(map::getNode).toList();
+        final List<DirectedEdge> pieceEdges = new ArrayList<>();
+        for (int i = 0; i < vertices.size(); i++) {
+            final Node start = pieceNodes.get(i);
+            final Node end   = pieceNodes.get((i + 1) % pieceNodes.size());
+            final DirectedEdge edge = map.getDirectedEdge(start, end);
+            pieceEdges.add(edge);
         }
 
-        return (closest != null && minDist <= threshold) ? closest : null;
-    }
-
-    private List<TemporaryObject> splitObject(TemporaryObject object, Node start, Node end) {
-        List<DirectedEdge> edges = object.getEdges();
-        List<DirectedEdge> path1 = getEdgesPath(edges, start, end);
-        List<DirectedEdge> path2 = getEdgesPath(edges, end, start);
-
-        TemporaryObject object1 = createTemporaryObject(object, path1);
-        TemporaryObject object2 = createTemporaryObject(object, path2);
-
-        if (object1 == null || object2 == null) return Collections.emptyList();
-
-        return List.of(object1, object2);
-    }
-
-    private List<DirectedEdge> getEdgesPath(List<DirectedEdge> edges, Node start, Node end) {
-        List<DirectedEdge> pathEdges = new ArrayList<>();
-        int n = edges.size();
-        boolean started = false;
-
-        for (int i = 0; i < n * 2; i++) {
-            DirectedEdge edge = edges.get(i % n);
-            if (edge.getStartNode().equals(start)) started = true;
-            if (started) pathEdges.add(edge);
-            if (edge.getEndNode().equals(end) && started) break;
-        }
-
-        // Close path.
-        Edge closeEdge = map.getEdge(end, start);
-        boolean isForward = closeEdge.getStart().equals(end);
-        pathEdges.add(new DirectedEdge(closeEdge, isForward));
-
-        return pathEdges;
-    }
-
-    private List<List<Point2D>> splitPolygon(List<Point2D> polygon, Point2D point1, Point2D point2) {
-        List<Point2D> path1 = getVerticesPath(polygon, point1, point2);
-        List<Point2D> path2 = getVerticesPath(polygon, point2, point1);
-
-        return List.of(path1, path2);
-    }
-
-    private List<Point2D> getVerticesPath(
-            final List<Point2D> vertices, final Point2D start, final Point2D end) {
-        // The last vertex duplicates the first to close the polygon; exclude it.
-        final int n = vertices.size() - 1;
-        final List<Point2D> pathVertices = new ArrayList<>();
-
-        boolean started = false;
-        for (int i = 0; i < n * 2; i++) {
-            final Point2D vertex = vertices.get(i % n);
-            if (vertex.equals(start)) started = true;
-            if (started) pathVertices.add(vertex);
-            if (vertex.equals(end) && started) break;
-        }
-
-        return pathVertices;
-    }
-
-    private List<Point2D> findConcaveVertices(List<Point2D> vertices) {
-        List<Point2D> concaveVertices = new ArrayList<>();
-        int n = vertices.size();
-        boolean isCounterclockwise = GeometryTools2D.isCounterClockwise(vertices);
-
-        for (int i = 0; i < n; i++) {
-            Point2D prevVertex = vertices.get((i - 1 + n) % n);
-            Point2D currVertex = vertices.get(i);
-            Point2D nextVertex = vertices.get((i + 1) % n);
-
-            Vector2D vector1 = currVertex.minus(prevVertex);
-            Vector2D vector2 = nextVertex.minus(currVertex);
-            double cross = vector1.cross(vector2);
-            double squaredThreshold = threshold * threshold;
-            if (isCounterclockwise && cross < -squaredThreshold || !isCounterclockwise && squaredThreshold < cross) {
-                concaveVertices.add(currVertex);
-            }
-        }
-
-        return concaveVertices;
-    }
-
-    private static List<Line2D> generateSplitLines(
-            final TemporaryObject object, final List<Point2D> concaveVertices) {
-        final List<Line2D> splitLines = new ArrayList<>();
-        final List<Point2D> polygonVertices = object.getVertices();
-        // The last vertex duplicates the first to close the polygon; exclude it.
-        final int n = polygonVertices.size() - 1;
-
-        for (final Point2D concaveVertex : concaveVertices) {
-            final int index = polygonVertices.indexOf(concaveVertex);
-            final int prev = (index - 1 + n) % n;
-            final int next = (index + 1) % n;
-
-            for (int i = 0; i < n; i++) {
-                if (i == index || i == prev || i == next) continue;
-
-                final Point2D candidateVertex = polygonVertices.get(i);
-                final Line2D line = new Line2D(concaveVertex, candidateVertex);
-                final Line2D reverseLine = new Line2D(candidateVertex, concaveVertex);
-
-                if (splitLines.contains(line) || splitLines.contains(reverseLine)) continue;
-
-                splitLines.add(line);
-            }
-        }
-
-        return splitLines;
-    }
-
-    // Create a new TemporaryObject of the same type as the original, using provided edges.
-    private TemporaryObject createTemporaryObject(TemporaryObject original, List<DirectedEdge> path) {
-        if (path.isEmpty()) return null;
-
-        List<DirectedEdge> edgesCopy = new ArrayList<>(path);
-
-        if (original instanceof TemporaryRoad) {
-            return new TemporaryRoad(edgesCopy);
-        } else if (original instanceof TemporaryIntersection) {
-            return new TemporaryIntersection(edgesCopy);
-        } else if (original instanceof TemporaryBuilding building) {
-            return new TemporaryBuilding(edgesCopy, building.getBuildingID());
-        } else {
-            return null;
-        }
+        return switch (original) {
+            case TemporaryRoad         ignored  -> new TemporaryRoad(pieceEdges);
+            case TemporaryIntersection ignored  -> new TemporaryIntersection(pieceEdges);
+            case TemporaryBuilding     building -> new TemporaryBuilding(pieceEdges, building.getBuildingID());
+            default -> throw new IllegalStateException("Unsupported TemporaryObject type: "
+                    + original.getClass().getSimpleName());
+        };
     }
 
     // Check if a given line intersects with any line in a collection.
-    private boolean intersectsAny(Line2D line, Collection<Line2D> others) {
-        for (Line2D other : others) {
-            if (crosses(line, other)) return true;
-        }
-        return false;
+    private boolean intersectsAny(final Line2D line, final Collection<Line2D> others) {
+        return others.stream().anyMatch(other -> crosses(line, other));
     }
 
     // Check if two line segments properly cross each other (excluding touching at endpoints).
-    private boolean crosses(Line2D line1, Line2D line2) {
+    private boolean crosses(final Line2D line1, final Line2D line2) {
         // Compute intersection parameters along each line
-        double intersection1 = line1.getIntersection(line2);
-        double intersection2 = line2.getIntersection(line1);
+        final double intersection1 = line1.getIntersection(line2);
+        final double intersection2 = line2.getIntersection(line1);
 
         // If lines are parallel, they do not have a valid intersection.
         if (Double.isNaN(intersection1) || Double.isNaN(intersection2)) return false;
 
         // Define a small threshold to avoid counting endpoints as crossings.
-        boolean isInternal1 = threshold < intersection1 && intersection1 < (1.0 - threshold);
-        boolean isInternal2 = threshold < intersection2 && intersection2 < (1.0 - threshold);
+        final boolean isInternal1 = threshold < intersection1 && intersection1 < (1.0 - threshold);
+        final boolean isInternal2 = threshold < intersection2 && intersection2 < (1.0 - threshold);
 
         return isInternal1 && isInternal2;
     }
