@@ -40,6 +40,11 @@ public final class Convert {
         String gmlFile = null;
         boolean showGui = false;
 
+        if (args.length == 0) {
+            printUsage();
+            System.exit(1);
+        }
+
         for (String arg : args) {
             if ("--gui".equals(arg)) {
                 showGui = true;
@@ -55,6 +60,11 @@ public final class Convert {
                 printUsage();
                 System.exit(1);
             }
+        }
+
+        if (osmFile == null || gmlFile == null) {
+            printUsage();
+            System.exit(1);
         }
 
         ConvertStep.setGuiEnabled(showGui);
