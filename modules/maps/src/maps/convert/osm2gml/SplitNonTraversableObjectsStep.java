@@ -2,6 +2,8 @@ package maps.convert.osm2gml;
 
 import maps.convert.ConvertStep;
 import maps.convert.osm2gml.debug.*;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 import rescuecore2.misc.geometry.GeometryTools2D;
 import rescuecore2.misc.geometry.Line2D;
 import rescuecore2.misc.geometry.Point2D;
@@ -22,6 +24,8 @@ public class SplitNonTraversableObjectsStep extends ConvertStep {
     private static final double CLEARANCE_THRESHOLD_METER = 0.1;
     private static final double MIN_SPLIT_LENGTH_METER = 1.0;
     private static final boolean VISUALIZE_SPLIT_ITERATIONS = false;
+
+    private static final Logger LOGGER = LoggerFactory.getLogger(SplitNonTraversableObjectsStep.class);
 
     /**
      * Constructs a new {@code SplitNonTraversableObjectsStep}.
@@ -200,11 +204,12 @@ public class SplitNonTraversableObjectsStep extends ConvertStep {
 
             SplitProposal bestProposal = findBestSplitLine(current);
             if (bestProposal == null) {
-                throw new IllegalStateException(
-                    "Failed to find a valid split line for a non-traversable polygon. " +
-                    "This indicates that the polygon has a complex self-interesting shape, " +
-                    "or there is a severe floating-point precision issue."
-                );
+                LOGGER.warn(
+                    "No valid split line found for a non-traversable polygon; keeping it unsplit. "
+                    + "This may indicate a complex self-intersecting shape or a floating-point precision issue. "
+                    + "Vertices: {}", current.vertices());
+                result.add(current);
+                continue;
             }
 
             if (VISUALIZE_SPLIT_ITERATIONS) {
