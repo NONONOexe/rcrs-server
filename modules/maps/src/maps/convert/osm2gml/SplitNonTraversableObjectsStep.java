@@ -262,8 +262,9 @@ public class SplitNonTraversableObjectsStep extends ConvertStep {
                     continue;
 
                 Point2D end = GeometryTools2D.getClosestPointOnSegment(impassableLine, origin);
-                if (end.equals(impassableLine.getOrigin()) || end.equals(impassableLine.getEndPoint()) ||
-                        map.containsNode(end))
+                boolean collidesWithPieceVertex = candidate.vertices().stream()
+                        .anyMatch(v -> map.sameGridCell(v, end));
+                if (collidesWithPieceVertex || map.containsNode(end))
                     continue;
 
                 Line2D testLine = new Line2D(origin, end);
