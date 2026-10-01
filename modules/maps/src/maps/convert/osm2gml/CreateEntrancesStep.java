@@ -4,6 +4,8 @@ import maps.convert.ConvertStep;
 import maps.convert.osm2gml.debug.DebugPalette;
 import maps.convert.osm2gml.debug.PolygonLayer;
 import maps.convert.osm2gml.debug.StepVisualizer;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 import rescuecore2.misc.geometry.GeometryTools2D;
 import rescuecore2.misc.geometry.Line2D;
 import rescuecore2.misc.geometry.Point2D;
@@ -30,6 +32,11 @@ public class CreateEntrancesStep extends ConvertStep {
             Node roadNode1, Node roadNode2
     ) {}
 
+    private static final Logger LOGGER = LoggerFactory.getLogger(CreateEntrancesStep.class);
+
+    // Outcome of the entrance creation attempt for a single building
+    private enum EntranceResult { ALREADY_CONNECTED, CONNECTED, NOT_CONNECTED }
+
     /**
      * Constructs a new {@code CreateEntrancesStep}.
      *
@@ -52,6 +59,7 @@ public class CreateEntrancesStep extends ConvertStep {
     protected void step() {
         List<TemporaryBuilding> buildings = new ArrayList<>(map.getBuildings());
         List<TemporaryIntersection> entrance = new ArrayList<>();
+        Map<EntranceResult, Integer> resultCounts = new EnumMap<>(EntranceResult.class);
         setProgressLimit(buildings.size());
 
         double cellSize = maxConnectDistance * 1.2;
@@ -60,17 +68,23 @@ public class CreateEntrancesStep extends ConvertStep {
 
         for (TemporaryBuilding building : buildings) {
             if (isAlreadyConnected(building, map.getRoads())) {
+                recordResult(building, EntranceResult.ALREADY_CONNECTED, resultCounts);
                 bumpProgress();
                 continue;
             }
 
             EntrancePlan bestPlan = findBestPlanForBuilding(building, objectGrid);
-            if (bestPlan != null) {
-                map.splitEdge(bestPlan.buildingEdge(), bestPlan.buildingNode1(), bestPlan.buildingNode2());
-                map.splitEdge(bestPlan.roadEdge(), bestPlan.roadNode1(), bestPlan.roadNode2());
-                map.addIntersection(bestPlan.entranceObject());
-                entrance.add(bestPlan.entranceObject());
+            if (bestPlan == null) {
+                recordResult(building, EntranceResult.NOT_CONNECTED, resultCounts);
+                bumpProgress();
+                continue;
             }
+
+            map.splitEdge(bestPlan.buildingEdge(), bestPlan.buildingNode1(), bestPlan.buildingNode2());
+            map.splitEdge(bestPlan.roadEdge(), bestPlan.roadNode1(), bestPlan.roadNode2());
+            map.addIntersection(bestPlan.entranceObject());
+            entrance.add(bestPlan.entranceObject());
+            recordResult(building, EntranceResult.CONNECTED, resultCounts);
             bumpProgress();
         }
 
@@ -80,6 +94,7 @@ public class CreateEntrancesStep extends ConvertStep {
 
         setProgress(buildings.size());
         setStatus("Created " + entrance.size() + " new entrances for buildings.");
+        logSummary(buildings.size(), resultCounts);
         visualizeResults(entrance);
     }
 
@@ -278,5 +293,19 @@ public class CreateEntrancesStep extends ConvertStep {
                         .outlineColor(DebugPalette.SLATE_STROKE)
                         .fillColor(DebugPalette.SLATE_FILL))
                 .show();
+    }
+
+    private void recordResult(
+            TemporaryBuilding building, EntranceResult result, Map<EntranceResult, Integer> counts) {
+        counts.merge(result, 1, Integer::sum);
+        LOGGER.info("ENTRANCE_RESULT building_id={} status={}", building.getId(), result);
+    }
+
+    private void logSummary(int total, Map<EntranceResult, Integer> counts) {
+        LOGGER.info("ENTRANCE_SUMMERY total={} already_connected={} connected={} not_connected={}",
+                total,
+                counts.getOrDefault(EntranceResult.ALREADY_CONNECTED, 0),
+                counts.getOrDefault(EntranceResult.CONNECTED, 0),
+                counts.getOrDefault(EntranceResult.NOT_CONNECTED, 0));
     }
 }
