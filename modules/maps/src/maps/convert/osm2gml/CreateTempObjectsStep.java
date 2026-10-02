@@ -5,6 +5,8 @@ import maps.convert.ConvertStep;
 import java.util.*;
 
 import maps.convert.osm2gml.debug.*;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 import rescuecore2.misc.geometry.Point2D;
 
 /**
@@ -12,6 +14,8 @@ import rescuecore2.misc.geometry.Point2D;
  */
 public class CreateTempObjectsStep extends ConvertStep {
     private final TemporaryMap map;
+
+    private static final Logger LOGGER = LoggerFactory.getLogger(CreateTempObjectsStep.class);
 
     /**
      * Constructs a new {@code MakeTempObjectsStep}.
@@ -40,6 +44,9 @@ public class CreateTempObjectsStep extends ConvertStep {
         final Set<TemporaryObject> buildings = generateObjects(osmBuildings);
         setStatus("Created " + roads.size() + " roads, " + intersections.size() + " intersections, " +
                 buildings.size() + " buildings");
+        logCount(TemporaryRoad.class, osmRoads.size(), roads.size());
+        logCount(TemporaryIntersection.class, osmIntersections.size(), intersections.size());
+        logCount(TemporaryBuilding.class, osmBuildings.size(), buildings.size());
         visualizeResults(roads, intersections, buildings);
     }
 
@@ -99,5 +106,11 @@ public class CreateTempObjectsStep extends ConvertStep {
                         .outlineColor(DebugPalette.MOSS_STROKE)
                         .fillColor(DebugPalette.MOSS_FILL))
                 .show();
+    }
+
+    // Logs how many temporary objects of one type were created from the given number of OSM shapes.
+    private void logCount(Class<? extends TemporaryObject> type, int osmCount, int createdCount) {
+        LOGGER.info("TEMP_OBJECTS_COUNT object_type={} osm_count={} created_count={}",
+                type.getSimpleName(), osmCount, createdCount);
     }
 }
