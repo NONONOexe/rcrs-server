@@ -45,7 +45,7 @@ public class CreateIntersectionAreasStep extends ConvertStep {
     private record IntersectionGeometry(int degree, List<Point2D> vertices, List<Corner> corners) {}
 
     /**
-     * Constructs a new {@code GenerateIntersectionAreaStep}.
+     * Constructs a new {@code CreateIntersectionAreasStep}.
      *
      * @param map the map
      */
