@@ -12,17 +12,18 @@ import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
 /**
-   This step splits any shapes that overlap.
-*/
+ * Splits any shapes that overlap.
+ */
 public class SplitShapesStep extends ConvertStep {
     private final TemporaryMap map;
 
     private static final Logger LOGGER = LoggerFactory.getLogger(SplitShapesStep.class);
 
     /**
-       Construct a SplitFacesStep.
-       @param map The map to use.
-    */
+     * Constructs a new {@code SplitShapesStep}.
+     *
+     * @param map the map
+     */
     public SplitShapesStep(TemporaryMap map) {
         this.map = map;
     }
