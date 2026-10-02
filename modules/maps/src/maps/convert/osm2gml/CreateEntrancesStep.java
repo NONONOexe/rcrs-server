@@ -20,10 +20,35 @@ import java.util.*;
  */
 public class CreateEntrancesStep extends ConvertStep {
     private final TemporaryMap map;
+
+    private final EntranceStrategy strategy;
     private final double maxConnectDistance;
     private final double minConnectDistance;
     private final double maxAngleDeviation;
     private final double entranceWidth;
+
+    /**
+     * Strategy for choosing where an entrance attaches to a road.
+     */
+    public enum EntranceStrategy {
+        /**
+         * Connects the wall midpoint to the closest point on each nearby road edge, discards
+         * candidates exceeding the angle tolerance, and selects the candidate whose center line
+         * is closest to perpendicular to both the wall and the road edge.
+         */
+        MIN_ANGLE_DEVIATION,
+
+        /**
+         * Drops a perpendicular from the wall midpoint and selects the road edge it reaches
+         * with the shortest entrance. No angle constraint is applied.
+         *
+         * <p>This is the method adopted by Hosoya et al. (2019), "Map Creations with OpenStreetMap
+         * for RoboCupRescue Simulation", 2019 6th International Conference on Computational
+         * Science/Intelligence and Applied Informatics (CSII), pp. 60-65.
+         * DOI: <a href="https://doi.org/10.1109/CSII.2019.00018">10.1109/CSII.2019.00018</a>
+         */
+        NEAREST_PERPENDICULAR
+    }
 
     private record EntrancePlan(
             TemporaryIntersection entranceObject,
@@ -38,12 +63,23 @@ public class CreateEntrancesStep extends ConvertStep {
     private enum EntranceResult { ALREADY_CONNECTED, CONNECTED, NOT_CONNECTED }
 
     /**
-     * Constructs a new {@code CreateEntrancesStep}.
+     * Constructs a new {@code CreateEntrancesStep} using {@link EntranceStrategy#MIN_ANGLE_DEVIATION}.
      *
      * @param map the map
      */
     public CreateEntrancesStep(TemporaryMap map) {
+        this(map, EntranceStrategy.MIN_ANGLE_DEVIATION);
+    }
+
+    /**
+     * Constructs a new {@code CreateEntrancesStep}.
+     *
+     * @param map the map
+     * @param strategy the strategy used to choose where each entrance attaches to a road
+     */
+    public CreateEntrancesStep(TemporaryMap map, EntranceStrategy strategy) {
         this.map = map;
+        this.strategy = strategy;
         maxConnectDistance = ConvertTools.sizeOfMeters(map.getOSMMap(), 20);
         minConnectDistance = ConvertTools.sizeOfMeters(map.getOSMMap(), 1); // Nearby threshold
         maxAngleDeviation = 45;
@@ -98,10 +134,26 @@ public class CreateEntrancesStep extends ConvertStep {
         visualizeResults(entrance);
     }
 
+    private boolean isAlreadyConnected(TemporaryBuilding building, Collection<TemporaryRoad> roads) {
+        Set<Edge> buildingEdges = new HashSet<>();
+        for (DirectedEdge de : building.getEdges()) {
+            buildingEdges.add(de.getEdge());
+        }
+        for (TemporaryRoad road : roads) {
+            for (DirectedEdge de : road.getEdges()) {
+                if (buildingEdges.contains(de.getEdge())) {
+                    return true;
+                }
+            }
+        }
+
+        return false;
+    }
+
     private EntrancePlan findBestPlanForBuilding(
             TemporaryBuilding building, SpatialGrid<TemporaryObject> objectGrid) {
         EntrancePlan bestPlan = null;
-        double bestAngleDeviation = Double.MAX_VALUE;
+        double bestScore = Double.MAX_VALUE;
         boolean isBuildingCCW = GeometryTools2D.isCounterClockwise(building.getVertices());
 
         for (DirectedEdge buildingEdge : building.getEdges()) {
@@ -118,7 +170,8 @@ public class CreateEntrancesStep extends ConvertStep {
 
                     Point2D wallMidPoint = buildingEdge.getMidpoint();
                     Line2D roadLine = roadEdge.getLine();
-                    Point2D connectingPoint = GeometryTools2D.getClosestPointOnSegment(roadLine, wallMidPoint);
+                    Point2D connectingPoint = findConnectingPoint(wallMidPoint, buildingEdge, isBuildingCCW, roadLine);
+                    if (connectingPoint == null) continue;
 
                     Vector2D wallToRoad = connectingPoint.minus(wallMidPoint);
                     if (pointsInward(wallToRoad, buildingEdge, isBuildingCCW)) continue;
@@ -164,13 +217,13 @@ public class CreateEntrancesStep extends ConvertStep {
                     if (isConnectDistanceTooShort || isConnectDistanceTooLong) continue;
 
                     double angleDeviation = calculateAngleDeviation(entranceCenterLine, buildingEdge, roadEdge);
-                    boolean exceedsAngleToTolerance = maxAngleDeviation < angleDeviation;
-                    if (exceedsAngleToTolerance) continue;
+                    if (!isAngleAcceptable(angleDeviation)) continue;
 
                     if (hasCollision(entrance, building, road)) continue;
 
-                    if (angleDeviation < bestAngleDeviation) {
-                        bestAngleDeviation = angleDeviation;
+                    double score = scoreOf(angleDeviation, entranceLength);
+                    if (score < bestScore) {
+                        bestScore = angleDeviation;
                         bestPlan = new EntrancePlan(entrance, buildingEdge.getEdge(), roadEdge.getEdge(), b1, b2, r1, r2);
                     }
                 }
@@ -180,10 +233,14 @@ public class CreateEntrancesStep extends ConvertStep {
         return bestPlan;
     }
 
-    private boolean pointsInward(final Vector2D direction, final DirectedEdge polygonEdge, boolean isCCW) {
+    // Returns the unit normal of the edge that points out of the polygon
+    private Vector2D outwardNormal(DirectedEdge polygonEdge, boolean isCCW) {
         Vector2D edgeDirection = polygonEdge.getLine().getDirection().normalised();
-        Vector2D outwardNormal = isCCW ? edgeDirection.getNormal().negate() : edgeDirection.getNormal();
-        return direction.dot(outwardNormal) < 0;
+        return isCCW ? edgeDirection.getNormal().negate() : edgeDirection.getNormal();
+    }
+
+    private boolean pointsInward(final Vector2D direction, final DirectedEdge polygonEdge, boolean isCCW) {
+        return direction.dot(outwardNormal(polygonEdge, isCCW)) < 0;
     }
 
     private boolean connectingEdgesCrossOwnGeometry(
@@ -251,20 +308,24 @@ public class CreateEntrancesStep extends ConvertStep {
         return Math.max(angleToBuilding, angleToRoad);
     }
 
-    private boolean isAlreadyConnected(TemporaryBuilding building, Collection<TemporaryRoad> roads) {
-        Set<Edge> buildingEdges = new HashSet<>();
-        for (DirectedEdge de : building.getEdges()) {
-            buildingEdges.add(de.getEdge());
-        }
-        for (TemporaryRoad road : roads) {
-            for (DirectedEdge de : road.getEdges()) {
-                if (buildingEdges.contains(de.getEdge())) {
-                    return true;
-                }
+    // Finds the point on a road edge where an entrance from the given wall would attach.
+    // Returns null if the strategy cannot reach this road edge from the wall.
+    private Point2D findConnectingPoint(
+            Point2D wallMidPoint, DirectedEdge buildingEdge, boolean isBuildingCCW, Line2D roadLine) {
+        return switch (strategy) {
+            case MIN_ANGLE_DEVIATION -> GeometryTools2D.getClosestPointOnSegment(roadLine, wallMidPoint);
+            case NEAREST_PERPENDICULAR -> {
+                // Drop a perpendicular from the wall midpoint and find where it hits this road edge.
+                Vector2D rayDirection = outwardNormal(buildingEdge, isBuildingCCW).scale(maxConnectDistance);
+                Line2D perpendicular = new Line2D(wallMidPoint, wallMidPoint.plus(rayDirection));
+                yield GeometryTools2D.getSegmentIntersectionPoint(perpendicular, roadLine);
             }
-        }
+        };
+    }
 
-        return false;
+    // Only the angle-based strategy discards candidates by angle deviation.
+    private boolean isAngleAcceptable(double angleDeviation) {
+        return strategy != EntranceStrategy.MIN_ANGLE_DEVIATION || angleDeviation <= maxAngleDeviation;
     }
 
     private boolean hasCollision(
@@ -279,6 +340,14 @@ public class CreateEntrancesStep extends ConvertStep {
         }
 
         return false;
+    }
+
+    // Returns the score used to rank candidates; lower is better.
+    private double scoreOf(double angleDeviation, double entranceLength) {
+        return switch (strategy) {
+            case MIN_ANGLE_DEVIATION -> angleDeviation;
+            case NEAREST_PERPENDICULAR -> entranceLength;
+        };
     }
 
     private void visualizeResults(List<TemporaryIntersection> entrances) {
@@ -302,8 +371,8 @@ public class CreateEntrancesStep extends ConvertStep {
     }
 
     private void logSummary(int total, Map<EntranceResult, Integer> counts) {
-        LOGGER.info("ENTRANCE_SUMMARY total={} already_connected={} connected={} not_connected={}",
-                total,
+        LOGGER.info("ENTRANCE_SUMMARY strategy={} total={} already_connected={} connected={} not_connected={}",
+                strategy, total,
                 counts.getOrDefault(EntranceResult.ALREADY_CONNECTED, 0),
                 counts.getOrDefault(EntranceResult.CONNECTED, 0),
                 counts.getOrDefault(EntranceResult.NOT_CONNECTED, 0));
