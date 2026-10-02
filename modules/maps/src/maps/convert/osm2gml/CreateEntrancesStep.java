@@ -302,7 +302,7 @@ public class CreateEntrancesStep extends ConvertStep {
     }
 
     private void logSummary(int total, Map<EntranceResult, Integer> counts) {
-        LOGGER.info("ENTRANCE_SUMMERY total={} already_connected={} connected={} not_connected={}",
+        LOGGER.info("ENTRANCE_SUMMARY total={} already_connected={} connected={} not_connected={}",
                 total,
                 counts.getOrDefault(EntranceResult.ALREADY_CONNECTED, 0),
                 counts.getOrDefault(EntranceResult.CONNECTED, 0),
