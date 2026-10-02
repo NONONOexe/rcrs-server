@@ -49,6 +49,8 @@ public class SplitNonTraversableObjectsStep extends ConvertStep {
 
         Set<TemporaryObject> removed = new LinkedHashSet<>();
         Set<TemporaryObject> created = new LinkedHashSet<>();
+        int splitCount = 0;
+        int unsplittableCount = 0;
 
         setProgressLimit(allObjects.size());
 
@@ -60,6 +62,13 @@ public class SplitNonTraversableObjectsStep extends ConvertStep {
             }
 
             Set<SplitCandidate> safePieces = splitIntoTraversableObjects(candidate);
+            logSplitResult(object, candidate, safePieces);
+            if (1 < safePieces.size()) {
+                splitCount++;
+            } else {
+                unsplittableCount++;
+            }
+
             map.removeTemporaryObject(object);
             removed.add(object);
             for (SplitCandidate safePiece : safePieces) {
@@ -72,7 +81,8 @@ public class SplitNonTraversableObjectsStep extends ConvertStep {
 
         map.resynchronizeStateFromObjects();
 
-        setStatus("Split " + removed.size() + " objects into " + created.size() + " traversable sub-shapes");
+        setStatus("Split " + splitCount + " objects into " + created.size() + " traversable sub-shapes");
+        logSummary(allObjects.size(), splitCount, unsplittableCount, created.size());
         visualizeResults(removed, created);
     }
 
@@ -428,5 +438,23 @@ public class SplitNonTraversableObjectsStep extends ConvertStep {
                         .fillColor(DebugPalette.SLATE_FILL)
                         .outlineColor(DebugPalette.SLATE_STROKE))
                 .show();
+    }
+
+    // Logs the outcome for one non-traversable object in a machine-readable key=value format.
+    // The location is the centroid of the original shape.
+    private void logSplitResult(TemporaryObject object, SplitCandidate original, Set<SplitCandidate> pieces) {
+        Point2D center = GeometryTools2D.computeCentroid(original.vertices());
+        long remaining = pieces.stream()
+                .filter(piece -> !piece.isTraversable(clearanceThreshold))
+                .count();
+        LOGGER.info("SPLIT_RESULT object_type={} x={} y={} piece_count={} non_traversable_piece_count={}",
+                object.getClass().getSimpleName(), center.getX(), center.getY(), pieces.size(), remaining);
+    }
+
+    // Logs aggregated counts for the whole step.
+    // An object counts as split once, regardless of how many pieces it was divided into.
+    private void logSummary(int total, int splitCount, int unsplittableCount, int createdCount) {
+        LOGGER.info("SPLIT_SUMMARY total={} traversable={} split={} unsplittable={} created={}",
+                total, total - splitCount - unsplittableCount, splitCount, unsplittableCount, createdCount);
     }
 }
