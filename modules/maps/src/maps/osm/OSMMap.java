@@ -331,43 +331,31 @@ public class OSMMap {
     }
 
     private void processWay(final Element e) {
-        final long id = Long.parseLong(e.attributeValue("id"));
+        long id = Long.parseLong(e.attributeValue("id"));
+        List<Long> ids = new ArrayList<>();
+        for (Element next : e.elements("nd")) {
+            ids.add(Long.parseLong(next.attributeValue("ref")));
+        }
+        Map<String, String> tags = readTags(e);
 
-        final List<Long> ids = new ArrayList<>();
-        for (final Element next : e.elements("nd")) {
-            final Long nextID = Long.parseLong(next.attributeValue("ref"));
-            ids.add(nextID);
+        // Buildings take priority over roads, as before.
+        if (OSMBuilding.isBuildingTagValue(tags.get("building"))) {
+            buildings.put(id, new OSMBuilding(id, ids));
+            return;
         }
 
-        // Road attributes.
-        OSMRoadType type = null;
-        int laneCount = -1;
+        // Ignore ways whose "highway" value is absent or unsupported.
+        Optional<OSMRoadType> type = OSMRoadType.fromTagValue(tags.get("highway"));
+        if (type.isEmpty()) return;
 
-        for (final Element tag : e.elements("tag")) {
-            final String key = tag.attributeValue("k");
-            final String value = tag.attributeValue("v");
+        int laneCount = Optional.ofNullable(tags.get("lanes")).map(Integer::parseInt).orElse(-1);
+        roads.put(id, new OSMRoad(id, ids, type.get(), laneCount));
+    }
 
-            // Check if this object is a building.
-            if ("building".equals(key) && "yes".equals(value)) {
-                final OSMBuilding building = new OSMBuilding(id, ids);
-                buildings.put(id, building);
-                return;
-            }
-
-            // Check if this object is a road.
-            if ("highway".equals(key)) {
-                final Optional<OSMRoadType> typeOptional = OSMRoadType.fromTagValue(value);
-                if (typeOptional.isEmpty()) continue;
-                type = typeOptional.get();
-            }
-
-            if ("lanes".equals(key)) {
-                laneCount = Integer.parseInt(value);
-            }
-        }
-
-        if (type != null) {
-            roads.put(id, new OSMRoad(id, ids, type, laneCount));
-        }
+    // Collect the key-value pairs of all tags of a way.
+    private Map<String, String> readTags(Element way) {
+        Map<String, String> tags = new HashMap<>();
+        way.elements("tag").forEach(tag -> tags.put(tag.attributeValue("k"), tag.attributeValue("v")));
+        return tags;
     }
 }
