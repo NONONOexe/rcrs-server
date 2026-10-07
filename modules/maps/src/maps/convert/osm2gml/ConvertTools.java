@@ -31,13 +31,12 @@ public final class ConvertTools {
 
     private ConvertTools() {}
 
-    /**
-       Compute the size of one metre in latitude/longitude for an OSMMap.
-       @param map The map to look up.
-       @return The size of one metre on the given map.
-    */
     public static double sizeOf1MetreLatitude(OSMMap map) {
         return MapTools.sizeOf1MetreLatitude(map.getCenterLatitude(), map.getCenterLongitude());
+    }
+
+    public static double sizeOf1MetreLongitude(OSMMap map) {
+        return MapTools.sizeOf1MetreLongitude(map.getCenterLatitude(), map.getCenterLongitude());
     }
 
     /**
