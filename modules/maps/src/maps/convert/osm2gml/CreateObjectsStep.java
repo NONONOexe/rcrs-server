@@ -76,7 +76,7 @@ public class CreateObjectsStep extends ConvertStep {
             yMin = Math.min(yMin, next.getY());
         }
 
-        final double sizeOf1m = ConvertTools.sizeOf1Metre(map.getOSMMap());
+        final double sizeOf1m = ConvertTools.sizeOf1MetreLatitude(map.getOSMMap());
         final double scale = 1.0 / sizeOf1m;
         return new ScaleConversion(xMin, yMin, scale, scale);
     }

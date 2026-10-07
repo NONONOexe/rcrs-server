@@ -36,8 +36,8 @@ public final class ConvertTools {
        @param map The map to look up.
        @return The size of one metre on the given map.
     */
-    public static double sizeOf1Metre(OSMMap map) {
-        return MapTools.sizeOf1Metre(map.getCenterLatitude(), map.getCenterLongitude());
+    public static double sizeOf1MetreLatitude(OSMMap map) {
+        return MapTools.sizeOf1MetreLatitude(map.getCenterLatitude(), map.getCenterLongitude());
     }
 
     /**
@@ -47,7 +47,7 @@ public final class ConvertTools {
      * @return The equivalent size in degrees.
      */
     public static double sizeOfMeters(OSMMap map, double metres) {
-        return sizeOf1Metre(map) * metres;
+        return sizeOf1MetreLatitude(map) * metres;
     }
 
     /**
@@ -57,7 +57,7 @@ public final class ConvertTools {
        @return The size of the nearby-node threshold for the map in degrees.
     */
     public static double nearbyThreshold(OSMMap map, double thresholdM) {
-        return sizeOf1Metre(map) * thresholdM;
+        return sizeOf1MetreLatitude(map) * thresholdM;
     }
 
     /**

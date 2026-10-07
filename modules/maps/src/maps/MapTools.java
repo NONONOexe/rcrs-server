@@ -19,7 +19,7 @@ public final class MapTools {
        @param lon The longitude of the reference point.
        @return The size of one metre at the reference point.
     */
-    public static double sizeOf1Metre(double lat, double lon) {
+    public static double sizeOf1MetreLatitude(double lat, double lon) {
         UTM centre = UTM.latLongToUtm(LatLong.valueOf(lat, lon, NonSI.DEGREE_ANGLE), ReferenceEllipsoid.WGS84);
         UTM offset = UTM.valueOf(centre.longitudeZone(), centre.latitudeZone(), centre.eastingValue(SI.METRE), centre.northingValue(SI.METRE) + 1, SI.METRE);
         LatLong result = UTM.utmToLatLong(offset, ReferenceEllipsoid.WGS84);

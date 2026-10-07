@@ -72,7 +72,7 @@ public class TemporaryMap {
             }
         };
 
-        this.gridSpacing = ConvertTools.sizeOf1Metre(osmMap);
+        this.gridSpacing = ConvertTools.sizeOf1MetreLatitude(osmMap);
         this.gridOriginX = osmMap.getCenterLatitude();
         this.gridOriginY = osmMap.getCenterLongitude();
         this.nodeGrid    = new LinkedHashMap<>();

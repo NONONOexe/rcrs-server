@@ -51,7 +51,7 @@ public class CreateIntersectionAreasStep extends ConvertStep {
      */
     public CreateIntersectionAreasStep(TemporaryMap map) {
         this.map = map;
-        sizeOf1Meter = ConvertTools.sizeOf1Metre(map.getOSMMap());
+        sizeOf1Meter = ConvertTools.sizeOf1MetreLatitude(map.getOSMMap());
     }
 
     @Override
