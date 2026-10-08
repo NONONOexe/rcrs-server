@@ -1,7 +1,6 @@
 package maps.osm;
 
 import java.util.List;
-import java.util.Set;
 
 /**
    A building in OSM space.
