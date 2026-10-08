@@ -223,7 +223,7 @@ public class CreateEntrancesStep extends ConvertStep {
 
                     double score = scoreOf(angleDeviation, entranceLength);
                     if (score < bestScore) {
-                        bestScore = angleDeviation;
+                        bestScore = score;
                         bestPlan = new EntrancePlan(entrance, buildingEdge.getEdge(), roadEdge.getEdge(), b1, b2, r1, r2);
                     }
                 }
