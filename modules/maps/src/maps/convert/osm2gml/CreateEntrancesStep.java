@@ -83,7 +83,7 @@ public class CreateEntrancesStep extends ConvertStep {
     private record Evaluation(
             EntrancePlan plan, RejectReason reason, CandidatePair pair,
             double entranceLength, double angleDeviation,
-            TemporaryObject collidedWith, Edge crossedEdge) {
+            TemporaryObject collidedWith, Crossing crossing) {
 
         static Evaluation accepted(CandidatePair pair, EntrancePlan plan, double entranceLength, double angleDeviation) {
             return new Evaluation(plan, null, pair, entranceLength, angleDeviation, null, null);
@@ -101,8 +101,8 @@ public class CreateEntrancesStep extends ConvertStep {
             return new Evaluation(null, RejectReason.COLLISION, pair, entranceLength, angleDeviation, other, null);
         }
 
-        static Evaluation crossed(CandidatePair pair, double entranceLength, double angleDeviation, Edge crossedEdge) {
-            return new Evaluation(null, RejectReason.CROSSES_OWN_GEOMETRY, pair, entranceLength, angleDeviation, null, crossedEdge);
+        static Evaluation crossed(CandidatePair pair, double entranceLength, double angleDeviation, Crossing crossing) {
+            return new Evaluation(null, RejectReason.CROSSES_OWN_GEOMETRY, pair, entranceLength, angleDeviation, null, crossing);
         }
 
         boolean isAccepted() {
@@ -123,6 +123,9 @@ public class CreateEntrancesStep extends ConvertStep {
     private record SearchResult(
             EntrancePlan plan, Map<RejectReason, RejectionSummary> rejections,
             int nearbyRoads, int shortWalls) {}
+
+    // Describes a side edge of the entrance that crosses an edge of the building or road
+    private record Crossing(DirectedEdge sideEdge, DirectedEdge crossedEdge, Point2D point) {}
 
     /**
      * Constructs a new {@code CreateEntrancesStep} using {@link EntranceStrategy#MIN_ANGLE_DEVIATION}.
@@ -305,9 +308,9 @@ public class CreateEntrancesStep extends ConvertStep {
             return Evaluation.rejected(pair, RejectReason.DEGENERATE_ENTRANCE, entranceLength, angleDeviation);
         }
 
-        Optional<DirectedEdge> crossedEdge = findCrossedEdge(entranceEdges, b1, b2, buildingEdge, roadEdge, building, road);
-        if (crossedEdge.isPresent()) {
-            return Evaluation.crossed(pair, entranceLength, angleDeviation, crossedEdge.get().getEdge());
+        Optional<Crossing> crossing = findCrossedEdge(entranceEdges, b1, b2, buildingEdge, roadEdge, building, road);
+        if (crossing.isPresent()) {
+            return Evaluation.crossed(pair, entranceLength, angleDeviation, crossing.get());
         }
 
         TemporaryIntersection entrance = new TemporaryIntersection(entranceEdges);
@@ -363,14 +366,14 @@ public class CreateEntrancesStep extends ConvertStep {
     }
 
     // Returns the first edge of the building or the road crossed by a side edge of the entrance
-    private Optional<DirectedEdge> findCrossedEdge(
+    private Optional<Crossing> findCrossedEdge(
             List<DirectedEdge> entranceEdges, final Node b1, final Node b2,
             DirectedEdge buildingEdge, final DirectedEdge roadEdge,
             TemporaryBuilding building, final TemporaryRoad road) {
         for (DirectedEdge entranceEdge : entranceEdges) {
             if (isWallOrRoadEdge(entranceEdge, b1, b2)) continue;
 
-            Optional<DirectedEdge> crossed = findCrossedEdgeAmong(entranceEdge, building.getEdges(), buildingEdge);
+            Optional<Crossing> crossed = findCrossedEdgeAmong(entranceEdge, building.getEdges(), buildingEdge);
             if (crossed.isPresent()) return crossed;
 
             crossed = findCrossedEdgeAmong(entranceEdge, road.getEdges(), roadEdge);
@@ -380,14 +383,16 @@ public class CreateEntrancesStep extends ConvertStep {
     }
 
     // Returns the first edge other than the excluded one that the candidate crosses
-    private Optional<DirectedEdge> findCrossedEdgeAmong(
+    private Optional<Crossing> findCrossedEdgeAmong(
             DirectedEdge candidate, List<DirectedEdge> edges, DirectedEdge excluded) {
         Line2D candidateLine = candidate.getLine();
         return edges.stream()
                 .filter(edge -> !edge.equals(excluded))
                 // Edges meeting at a shared node are connected there, not crossing
                 .filter(edge -> !sharesNode(candidate, edge))
-                .filter(edge -> GeometryTools2D.getSegmentIntersectionPoint(candidateLine, edge.getLine()) != null)
+                .map(edge -> Optional.ofNullable(GeometryTools2D.getSegmentIntersectionPoint(candidateLine, edge.getLine()))
+                        .map(point -> new Crossing(candidate, edge, point)))
+                .flatMap(Optional::stream)
                 .findFirst();
     }
 
@@ -504,11 +509,21 @@ public class CreateEntrancesStep extends ConvertStep {
 
     private void logRejection(TemporaryBuilding building, RejectReason reason, RejectionSummary summary) {
         Evaluation e = summary.closest();
-        LOGGER.info("ENTRANCE_REJECTION building_id={} reason={} count={} length={} angle={} building_edge_id={} road_id={} road_edge_id={} collided_with={} crossed_edge={}",
+        Crossing c = e.crossing();
+        LOGGER.info("ENTRANCE_REJECTION building_id={} reason={} count={} length={} angle={} building_edge_id={} road_id={} road_edge_id={} collided_with={} crossed_edge={} side_edge_nodes={} crossed_edge_nodes={} crossing_x={} crossing_y={}",
                 building.getId(), reason, summary.count(), e.entranceLength(), e.angleDeviation(),
                 e.pair().buildingEdge().getEdge().getID(), e.pair().road().getId(),
                 e.pair().roadEdge().getEdge().getID(),
                 e.collidedWith() == null ? "NA" : e.collidedWith().getId(),
-                e.crossedEdge() == null ? "NA" : e.crossedEdge().getID());
+                c == null ? "NA" : c.crossedEdge().getEdge().getID(),
+                c == null ? "NA" : nodeIds(c.sideEdge()),
+                c == null ? "NA" : nodeIds(c.crossedEdge()),
+                c == null ? "NA" : c.point().getX(),
+                c == null ? "NA" : c.point().getY());
+    }
+
+    // Returns the ids of the start and end nodes of the edge as "start-end"
+    private Object nodeIds(DirectedEdge edge) {
+        return edge.getStartNode().getID() + "-" + edge.getEndNode().getID();
     }
 }
