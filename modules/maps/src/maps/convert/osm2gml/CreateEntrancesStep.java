@@ -103,6 +103,20 @@ public class CreateEntrancesStep extends ConvertStep {
         }
     }
 
+    // Rejected candidates of one reason for a building, keeping the one with the shortest entrance
+    private record RejectionSummary(int count, Evaluation closest) {
+        RejectionSummary merge(Evaluation evaluation) {
+            // Double.compare orders NaN last, so a measured candidate is preferred over an unmeasured one
+            boolean closer = Double.compare(evaluation.entranceLength(), closest.entranceLength()) < 0;
+            return new RejectionSummary(count + 1, closer ? evaluation : closest);
+        }
+    }
+
+    // Outcome of searching entrance plans for a building
+    private record SearchResult(
+            EntrancePlan plan, Map<RejectReason, RejectionSummary> rejections,
+            int nearbyRoads, int shortWalls) {}
+
     /**
      * Constructs a new {@code CreateEntrancesStep} using {@link EntranceStrategy#MIN_ANGLE_DEVIATION}.
      *
@@ -150,7 +164,7 @@ public class CreateEntrancesStep extends ConvertStep {
                 continue;
             }
 
-            EntrancePlan bestPlan = findBestPlanForBuilding(building, objectGrid);
+            EntrancePlan bestPlan = findBestPlanForBuilding(building, objectGrid).plan();
             if (bestPlan == null) {
                 recordResult(building, EntranceResult.NOT_CONNECTED, resultCounts);
                 bumpProgress();
@@ -191,24 +205,36 @@ public class CreateEntrancesStep extends ConvertStep {
         return false;
     }
 
-    private EntrancePlan findBestPlanForBuilding(
+    private SearchResult findBestPlanForBuilding(
             TemporaryBuilding building, SpatialGrid<TemporaryObject> objectGrid) {
         EntrancePlan bestPlan = null;
         double bestScore = Double.MAX_VALUE;
         boolean isBuildingCCW = GeometryTools2D.isCounterClockwise(building.getVertices());
+        Map<RejectReason, RejectionSummary> rejections = new EnumMap<>(RejectReason.class);
+        List<TemporaryRoad> nearbyRoads = objectGrid.getNearbyItems(building).stream()
+                .filter(TemporaryRoad.class::isInstance)
+                .map(TemporaryRoad.class::cast)
+                .toList();
+        int shortWalls = 0;
 
         for (DirectedEdge buildingEdge : building.getEdges()) {
-            if (buildingEdge.getLength() < entranceWidth) continue;
+            // Walls shorter than the entrance cannot hold one
+            if (buildingEdge.getLength() < entranceWidth) {
+                shortWalls++;
+                continue;
+            }
 
-            for (TemporaryObject object : objectGrid.getNearbyItems(building)) {
-                if (!(object instanceof TemporaryRoad road)) continue;
-
+            for (TemporaryRoad road : nearbyRoads) {
                 boolean isRoadCCW = GeometryTools2D.isCounterClockwise(road.getVertices());
-
                 for (DirectedEdge roadEdge : road.getEdges()) {
-                    CandidatePair pair = new CandidatePair(buildingEdge, roadEdge, road);
-                    Evaluation evaluation = evaluateCandidate(building, pair, isBuildingCCW, isRoadCCW);
-                    if (!evaluation.isAccepted()) continue;
+                    Evaluation evaluation = evaluateCandidate(
+                            building, new CandidatePair(buildingEdge, roadEdge, road), isBuildingCCW, isRoadCCW);
+                    if (!evaluation.isAccepted()) {
+                        rejections.compute(evaluation.reason(),
+                                (reason, summary) -> summary == null ?
+                                        new RejectionSummary(1, evaluation) : summary.merge(evaluation));
+                        continue;
+                    }
 
                     double score = scoreOf(evaluation.angleDeviation(), evaluation.entranceLength());
                     if (bestScore <= score) continue;
@@ -219,7 +245,7 @@ public class CreateEntrancesStep extends ConvertStep {
             }
         }
 
-        return bestPlan;
+        return new SearchResult(bestPlan, rejections, nearbyRoads.size(), shortWalls);
     }
 
     private Evaluation evaluateCandidate(
