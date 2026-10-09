@@ -2,6 +2,7 @@ package maps.convert.osm2gml;
 
 import maps.convert.ConvertStep;
 import maps.convert.osm2gml.debug.DebugPalette;
+import maps.convert.osm2gml.debug.LineLayer;
 import maps.convert.osm2gml.debug.PolygonLayer;
 import maps.convert.osm2gml.debug.StepVisualizer;
 import org.slf4j.Logger;
@@ -457,6 +458,9 @@ public class CreateEntrancesStep extends ConvertStep {
                         .name("Objects")
                         .outlineColor(DebugPalette.SLATE_STROKE)
                         .fillColor(DebugPalette.SLATE_FILL))
+                .backgroundLayer(LineLayer.of(map.getAllEdges())
+                        .name("Edges")
+                        .color(DebugPalette.SLATE_STROKE))
                 .show();
     }
 
