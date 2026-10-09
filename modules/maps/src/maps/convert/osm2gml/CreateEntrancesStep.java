@@ -148,6 +148,9 @@ public class CreateEntrancesStep extends ConvertStep {
 
     @Override
     protected void step() {
+        LOGGER.info("ENTRANCE_CONFIG strategy={} entrance_width={} min_connect={} max_connect={} max_angle={}",
+                strategy, entranceWidth, minConnectDistance, maxConnectDistance, maxAngleDeviation);
+
         List<TemporaryBuilding> buildings = new ArrayList<>(map.getBuildings());
         List<TemporaryIntersection> entrance = new ArrayList<>();
         Map<EntranceResult, Integer> resultCounts = new EnumMap<>(EntranceResult.class);
@@ -164,13 +167,15 @@ public class CreateEntrancesStep extends ConvertStep {
                 continue;
             }
 
-            EntrancePlan bestPlan = findBestPlanForBuilding(building, objectGrid).plan();
-            if (bestPlan == null) {
+            SearchResult search = findBestPlanForBuilding(building, objectGrid);
+            if (search.plan() == null) {
                 recordResult(building, EntranceResult.NOT_CONNECTED, resultCounts);
+                logDiagnostics(building, search);
                 bumpProgress();
                 continue;
             }
 
+            EntrancePlan bestPlan = search.plan();
             map.splitEdge(bestPlan.buildingEdge(), bestPlan.buildingNode1(), bestPlan.buildingNode2());
             map.splitEdge(bestPlan.roadEdge(), bestPlan.roadNode1(), bestPlan.roadNode2());
             map.addIntersection(bestPlan.entranceObject());
@@ -467,5 +472,21 @@ public class CreateEntrancesStep extends ConvertStep {
                 counts.getOrDefault(EntranceResult.ALREADY_CONNECTED, 0),
                 counts.getOrDefault(EntranceResult.CONNECTED, 0),
                 counts.getOrDefault(EntranceResult.NOT_CONNECTED, 0));
+    }
+
+    private void logDiagnostics(TemporaryBuilding building, SearchResult search) {
+        int candidates = search.rejections().values().stream().mapToInt(RejectionSummary::count).sum();
+        LOGGER.info("ENTRANCE_DIAGNOSTICS building_id={} edges={} short_walls={} nearby_roads={} candidates={}",
+                building.getId(), building.getEdges().size(), search.shortWalls(), search.nearbyRoads(), candidates);
+        search.rejections().forEach((reason, summary) -> logRejection(building, reason, summary));
+    }
+
+    private void logRejection(TemporaryBuilding building, RejectReason reason, RejectionSummary summary) {
+        Evaluation e = summary.closest();
+        LOGGER.info("ENTRANCE_REJECTION building_id={} reason={} count={} length={} angle={} building_edge_id={} road_id={} road_edge_id={} collided_with={}",
+                building.getId(), reason, summary.count(), e.entranceLength(), e.angleDeviation(),
+                e.pair().buildingEdge().getEdge().getID(), e.pair().road().getId(),
+                e.pair().roadEdge().getEdge().getID(),
+                e.collidedWith() == null ? "NA" : e.collidedWith().getId());
     }
 }
