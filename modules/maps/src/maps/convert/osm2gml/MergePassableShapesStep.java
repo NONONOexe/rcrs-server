@@ -8,9 +8,6 @@ import maps.convert.osm2gml.debug.StepVisualizer;
 import java.awt.geom.Area;
 import java.util.*;
 
-import static maps.convert.osm2gml.ConvertTools.areaToTemporaryPassableShapes;
-import static maps.convert.osm2gml.ConvertTools.overlaps;
-
 public class MergePassableShapesStep extends ConvertStep {
     private final TemporaryMap map;
 
@@ -44,8 +41,8 @@ public class MergePassableShapesStep extends ConvertStep {
                 }
 
                 // Convert the combined area back to new passable shapes. ignoring any holes.
-                List<TemporaryObject> mergedPassableShapes =
-                        areaToTemporaryPassableShapes(combinedArea, group.getFirst(), map);
+                List<TemporaryObject> mergedPassableShapes = ConvertTools.areaToTemporaryPassableShapes(
+                        combinedArea, group.getFirst(), map);
 
                 if (!mergedPassableShapes.isEmpty()) {
                     passableShapesToRemove.addAll(group);
@@ -96,7 +93,7 @@ public class MergePassableShapesStep extends ConvertStep {
                 for (int j = i; j < objectList.size(); j++) {
                     TemporaryObject neighbour = objectList.get(j);
                     if (visited.contains(neighbour) || current.equals(neighbour)) continue;
-                    if (!overlaps(current, neighbour)) continue;
+                    if (!ConvertTools.overlaps(current, neighbour)) continue;
 
                     visited.add(neighbour);
                     queue.add(neighbour);
