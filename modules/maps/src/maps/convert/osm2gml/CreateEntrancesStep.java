@@ -81,10 +81,11 @@ public class CreateEntrancesStep extends ConvertStep {
 
     private record Evaluation(
             EntrancePlan plan, RejectReason reason, CandidatePair pair,
-            double entranceLength, double angleDeviation, TemporaryObject collidedWith) {
+            double entranceLength, double angleDeviation,
+            TemporaryObject collidedWith, Edge crossedEdge) {
 
         static Evaluation accepted(CandidatePair pair, EntrancePlan plan, double entranceLength, double angleDeviation) {
-            return new Evaluation(plan, null, pair, entranceLength, angleDeviation, null);
+            return new Evaluation(plan, null, pair, entranceLength, angleDeviation, null, null);
         }
 
         static Evaluation rejected(CandidatePair pair, RejectReason reason) {
@@ -92,11 +93,15 @@ public class CreateEntrancesStep extends ConvertStep {
         }
 
         static Evaluation rejected(CandidatePair pair, RejectReason reason, double entranceLength, double angleDeviation) {
-            return new Evaluation(null, reason, pair, entranceLength, angleDeviation, null);
+            return new Evaluation(null, reason, pair, entranceLength, angleDeviation, null, null);
         }
 
         static Evaluation collided(CandidatePair pair, double entranceLength, double angleDeviation, TemporaryObject other) {
-            return new Evaluation(null, RejectReason.COLLISION, pair, entranceLength, angleDeviation, other);
+            return new Evaluation(null, RejectReason.COLLISION, pair, entranceLength, angleDeviation, other, null);
+        }
+
+        static Evaluation crossed(CandidatePair pair, double entranceLength, double angleDeviation, Edge crossedEdge) {
+            return new Evaluation(null, RejectReason.CROSSES_OWN_GEOMETRY, pair, entranceLength, angleDeviation, null, crossedEdge);
         }
 
         boolean isAccepted() {
@@ -298,8 +303,10 @@ public class CreateEntrancesStep extends ConvertStep {
         if (entranceEdges == null) {
             return Evaluation.rejected(pair, RejectReason.DEGENERATE_ENTRANCE, entranceLength, angleDeviation);
         }
-        if (connectingEdgesCrossOwnGeometry(entranceEdges, b1, b2, buildingEdge, roadEdge, building, road)) {
-            return Evaluation.rejected(pair, RejectReason.CROSSES_OWN_GEOMETRY, entranceLength, angleDeviation);
+
+        Optional<DirectedEdge> crossedEdge = findCrossedEdge(entranceEdges, b1, b2, buildingEdge, roadEdge, building, road);
+        if (crossedEdge.isPresent()) {
+            return Evaluation.crossed(pair, entranceLength, angleDeviation, crossedEdge.get().getEdge());
         }
 
         TemporaryIntersection entrance = new TemporaryIntersection(entranceEdges);
@@ -354,35 +361,37 @@ public class CreateEntrancesStep extends ConvertStep {
                 .findFirst();
     }
 
-    private boolean connectingEdgesCrossOwnGeometry(
+    // Returns the first edge of the building or the road crossed by a side edge of the entrance
+    private Optional<DirectedEdge> findCrossedEdge(
             List<DirectedEdge> entranceEdges, final Node b1, final Node b2,
             DirectedEdge buildingEdge, final DirectedEdge roadEdge,
             TemporaryBuilding building, final TemporaryRoad road) {
         for (DirectedEdge entranceEdge : entranceEdges) {
             if (isWallOrRoadEdge(entranceEdge, b1, b2)) continue;
 
-            if (crossAnyEdgeExcept(entranceEdge, building.getEdges(), buildingEdge)) return true;
-            if (crossAnyEdgeExcept(entranceEdge, road.getEdges(), roadEdge)) return true;
+            Optional<DirectedEdge> crossed = findCrossedEdgeAmong(entranceEdge, building.getEdges(), buildingEdge);
+            if (crossed.isPresent()) return crossed;
+
+            crossed = findCrossedEdgeAmong(entranceEdge, road.getEdges(), roadEdge);
+            if (crossed.isPresent()) return crossed;
         }
-        return false;
+        return Optional.empty();
+    }
+
+    // Returns the first edge other than the excluded one that the candidate touches or crosses
+    private Optional<DirectedEdge> findCrossedEdgeAmong(
+            DirectedEdge candidate, List<DirectedEdge> edges, DirectedEdge excluded) {
+        Line2D candidateLine = candidate.getLine();
+        return edges.stream()
+                .filter(edge -> !edge.equals(excluded))
+                .filter(edge -> GeometryTools2D.getSegmentIntersectionPoint(candidateLine, edge.getLine()) != null)
+                .findFirst();
     }
 
     private boolean isWallOrRoadEdge(final DirectedEdge edge, final Node b1, final Node b2) {
         boolean startOnBuildingSide = edge.getStartNode().equals(b1) || edge.getStartNode().equals(b2);
         boolean endOnBuildingSide = edge.getEndNode().equals(b1) || edge.getEndNode().equals(b2);
         return startOnBuildingSide == endOnBuildingSide;
-    }
-
-    private boolean crossAnyEdgeExcept(
-            DirectedEdge candidate, List<DirectedEdge> edges, DirectedEdge excluded) {
-        Line2D candidateLine = candidate.getLine();
-        for (DirectedEdge edge : edges) {
-            if (edge.equals(excluded)) continue;
-            if (GeometryTools2D.getSegmentIntersectionPoint(candidateLine, edge.getLine()) != null) {
-                return true;
-            }
-        }
-        return false;
     }
 
     // Build a list of directed edges forming the entrance polygon from four corner nodes.
@@ -487,10 +496,11 @@ public class CreateEntrancesStep extends ConvertStep {
 
     private void logRejection(TemporaryBuilding building, RejectReason reason, RejectionSummary summary) {
         Evaluation e = summary.closest();
-        LOGGER.info("ENTRANCE_REJECTION building_id={} reason={} count={} length={} angle={} building_edge_id={} road_id={} road_edge_id={} collided_with={}",
+        LOGGER.info("ENTRANCE_REJECTION building_id={} reason={} count={} length={} angle={} building_edge_id={} road_id={} road_edge_id={} collided_with={} crossed_edge={}",
                 building.getId(), reason, summary.count(), e.entranceLength(), e.angleDeviation(),
                 e.pair().buildingEdge().getEdge().getID(), e.pair().road().getId(),
                 e.pair().roadEdge().getEdge().getID(),
-                e.collidedWith() == null ? "NA" : e.collidedWith().getId());
+                e.collidedWith() == null ? "NA" : e.collidedWith().getId(),
+                e.crossedEdge() == null ? "NA" : e.crossedEdge().getID());
     }
 }
