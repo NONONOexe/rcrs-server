@@ -9,6 +9,7 @@ import java.awt.geom.Area;
 import java.util.*;
 
 import static maps.convert.osm2gml.ConvertTools.areaToTemporaryPassableShapes;
+import static maps.convert.osm2gml.ConvertTools.overlaps;
 
 public class MergePassableShapesStep extends ConvertStep {
     private final TemporaryMap map;
@@ -94,16 +95,11 @@ public class MergePassableShapesStep extends ConvertStep {
 
                 for (int j = i; j < objectList.size(); j++) {
                     TemporaryObject neighbour = objectList.get(j);
-                    if (!visited.contains(neighbour) && !current.equals(neighbour)) {
-                        if (current.getBounds().intersects(neighbour.getBounds())) {
-                            Area intersection = new Area(current.getShape());
-                            intersection.intersect(new Area(neighbour.getShape()));
-                            if (!intersection.isEmpty()) {
-                                visited.add(neighbour);
-                                queue.add(neighbour);
-                            }
-                        }
-                    }
+                    if (visited.contains(neighbour) || current.equals(neighbour)) continue;
+                    if (!overlaps(current, neighbour)) continue;
+
+                    visited.add(neighbour);
+                    queue.add(neighbour);
                 }
             }
             allGroups.add(currentGroup);
