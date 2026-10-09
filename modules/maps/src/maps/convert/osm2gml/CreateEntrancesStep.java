@@ -13,6 +13,7 @@ import rescuecore2.misc.geometry.Point2D;
 import rescuecore2.misc.geometry.Vector2D;
 
 import java.util.*;
+import java.util.stream.Stream;
 
 /**
  * Creates entrance roads serving as building entrances to connect
@@ -378,14 +379,21 @@ public class CreateEntrancesStep extends ConvertStep {
         return Optional.empty();
     }
 
-    // Returns the first edge other than the excluded one that the candidate touches or crosses
+    // Returns the first edge other than the excluded one that the candidate crosses
     private Optional<DirectedEdge> findCrossedEdgeAmong(
             DirectedEdge candidate, List<DirectedEdge> edges, DirectedEdge excluded) {
         Line2D candidateLine = candidate.getLine();
         return edges.stream()
                 .filter(edge -> !edge.equals(excluded))
+                // Edges meeting at a shared node are connected there, not crossing
+                .filter(edge -> !sharesNode(candidate, edge))
                 .filter(edge -> GeometryTools2D.getSegmentIntersectionPoint(candidateLine, edge.getLine()) != null)
                 .findFirst();
+    }
+
+    private boolean sharesNode(DirectedEdge a, DirectedEdge b) {
+        return Stream.of(a.getStartNode(), a.getEndNode())
+                .anyMatch(node -> node.equals(b.getStartNode()) || node.equals(b.getEndNode()));
     }
 
     private boolean isWallOrRoadEdge(final DirectedEdge edge, final Node b1, final Node b2) {
