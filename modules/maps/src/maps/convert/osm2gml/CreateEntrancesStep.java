@@ -62,6 +62,48 @@ public class CreateEntrancesStep extends ConvertStep {
     // Outcome of the entrance creation attempt for a single building
     private enum EntranceResult { ALREADY_CONNECTED, CONNECTED, NOT_CONNECTED }
 
+    // Reasons a candidate pair of building edge and road edge is rejected, declared in evaluation order
+    private enum RejectReason {
+        ROAD_EDGE_OCCUPIED,
+        ROAD_EDGE_TOO_SHORT,
+        NO_CONNECTING_POINT,
+        ROAD_BEHIND_WALL,
+        WALL_BEHIND_ROAD_EDGE,
+        DEGENERATE_ENTRANCE,
+        CROSSES_OWN_GEOMETRY,
+        TOO_SHORT,
+        TOO_LONG,
+        ANGLE_DEVIATION,
+        COLLISION
+    }
+
+    private record CandidatePair(DirectedEdge buildingEdge, DirectedEdge roadEdge, TemporaryRoad road) {}
+
+    private record Evaluation(
+            EntrancePlan plan, RejectReason reason, CandidatePair pair,
+            double entranceLength, double angleDeviation, TemporaryObject collidedWith) {
+
+        static Evaluation accepted(CandidatePair pair, EntrancePlan plan, double entranceLength, double angleDeviation) {
+            return new Evaluation(plan, null, pair, entranceLength, angleDeviation, null);
+        }
+
+        static Evaluation rejected(CandidatePair pair, RejectReason reason) {
+            return rejected(pair, reason, Double.NaN, Double.NaN);
+        }
+
+        static Evaluation rejected(CandidatePair pair, RejectReason reason, double entranceLength, double angleDeviation) {
+            return new Evaluation(null, reason, pair, entranceLength, angleDeviation, null);
+        }
+
+        static Evaluation collided(CandidatePair pair, double entranceLength, double angleDeviation, TemporaryObject other) {
+            return new Evaluation(null, RejectReason.COLLISION, pair, entranceLength, angleDeviation, other);
+        }
+
+        boolean isAccepted() {
+            return plan != null;
+        }
+    }
+
     /**
      * Constructs a new {@code CreateEntrancesStep} using {@link EntranceStrategy#MIN_ANGLE_DEVIATION}.
      *
@@ -165,72 +207,89 @@ public class CreateEntrancesStep extends ConvertStep {
                 boolean isRoadCCW = GeometryTools2D.isCounterClockwise(road.getVertices());
 
                 for (DirectedEdge roadEdge : road.getEdges()) {
-                    if (1 < map.getAttachedObjects(roadEdge).size()) continue;
-                    if (roadEdge.getLength() < entranceWidth) continue;
+                    CandidatePair pair = new CandidatePair(buildingEdge, roadEdge, road);
+                    Evaluation evaluation = evaluateCandidate(building, pair, isBuildingCCW, isRoadCCW);
+                    if (!evaluation.isAccepted()) continue;
 
-                    Point2D wallMidPoint = buildingEdge.getMidpoint();
-                    Line2D roadLine = roadEdge.getLine();
-                    Point2D connectingPoint = findConnectingPoint(wallMidPoint, buildingEdge, isBuildingCCW, roadLine);
-                    if (connectingPoint == null) continue;
+                    double score = scoreOf(evaluation.angleDeviation(), evaluation.entranceLength());
+                    if (bestScore <= score) continue;
 
-                    Vector2D wallToRoad = connectingPoint.minus(wallMidPoint);
-                    if (pointsInward(wallToRoad, buildingEdge, isBuildingCCW)) continue;
-                    Vector2D roadToWall = wallMidPoint.minus(connectingPoint);
-                    if (pointsInward(roadToWall, roadEdge, isRoadCCW)) continue;
-
-                    // Safely calculate the entrance roof on the road, sliding if necessary.
-                    double distFromStart = GeometryTools2D.getDistance(roadLine.getOrigin(), connectingPoint);
-                    double distFromEnd = roadEdge.getLength() - distFromStart;
-                    double halfWidth = entranceWidth / 2.0;
-                    if (distFromStart < halfWidth) {
-                        double slideAmount = halfWidth - distFromStart;
-                        connectingPoint = connectingPoint.plus(roadLine.getDirection().normalised().scale(slideAmount));
-                    } else if (distFromEnd < halfWidth) {
-                        double slideAmount = halfWidth - distFromEnd;
-                        connectingPoint = connectingPoint.plus(roadLine.getDirection().normalised().scale(-slideAmount));
-                    }
-
-                    Vector2D wallVector = buildingEdge.getLine().getDirection().normalised();
-                    Vector2D roadVector = roadLine.getDirection().normalised();
-                    Node b1 = map.getNode(wallMidPoint.plus(wallVector.scale(-halfWidth)));
-                    Node b2 = map.getNode(wallMidPoint.plus(wallVector.scale(halfWidth)));
-                    Node r1 = map.getNode(connectingPoint.plus(roadVector.scale(-halfWidth)));
-                    Node r2 = map.getNode(connectingPoint.plus(roadVector.scale(halfWidth)));
-
-                    // Build entrance edges, merging nearby nodes and skipping degenerate shapes.
-                    List<DirectedEdge> entranceEdges = buildEntranceEdges(b1, b2, r1, r2, wallVector, roadVector);
-                    if (entranceEdges == null) {
-                        continue;
-                    }
-                    if (connectingEdgesCrossOwnGeometry(entranceEdges, b1, b2, buildingEdge, roadEdge, building, road)) {
-                        continue;
-                    }
-
-                    TemporaryIntersection entrance = new TemporaryIntersection(entranceEdges);
-                    Line2D entranceCenterLine = new Line2D(wallMidPoint, connectingPoint);
-                    double entranceLength = entranceCenterLine.getDirection().getLength();
-
-                    // This prevents creating entrances that are too short to be meaningful
-                    // or are likely to cause geometric instability.
-                    boolean isConnectDistanceTooShort = entranceLength < minConnectDistance;
-                    boolean isConnectDistanceTooLong = maxConnectDistance < entranceLength;
-                    if (isConnectDistanceTooShort || isConnectDistanceTooLong) continue;
-
-                    double angleDeviation = calculateAngleDeviation(entranceCenterLine, buildingEdge, roadEdge);
-                    if (!isAngleAcceptable(angleDeviation)) continue;
-
-                    if (hasCollision(entrance, building, road)) continue;
-
-                    double score = scoreOf(angleDeviation, entranceLength);
-                    if (score < bestScore) {
-                        bestScore = score;
-                        bestPlan = new EntrancePlan(entrance, buildingEdge.getEdge(), roadEdge.getEdge(), b1, b2, r1, r2);
-                    }
+                    bestScore = score;
+                    bestPlan = evaluation.plan();
                 }
             }
         }
 
         return bestPlan;
+    }
+
+    private Evaluation evaluateCandidate(
+            TemporaryBuilding building, CandidatePair pair, boolean isBuildingCCW, boolean isRoadCCW) {
+        DirectedEdge buildingEdge = pair.buildingEdge();
+        DirectedEdge roadEdge = pair.roadEdge();
+        TemporaryRoad road = pair.road();
+
+        if (1 < map.getAttachedObjects(roadEdge).size()) {
+            return Evaluation.rejected(pair, RejectReason.ROAD_EDGE_OCCUPIED);
+        }
+        if (roadEdge.getLength() < entranceWidth) {
+            return Evaluation.rejected(pair, RejectReason.ROAD_EDGE_TOO_SHORT);
+        }
+
+        Point2D wallMidPoint = buildingEdge.getMidpoint();
+        Point2D reachedPoint = findConnectingPoint(wallMidPoint, buildingEdge, isBuildingCCW, roadEdge.getLine());
+        if (reachedPoint == null) {
+            return Evaluation.rejected(pair, RejectReason.NO_CONNECTING_POINT);
+        }
+        if (pointsInward(reachedPoint.minus(wallMidPoint), buildingEdge, isBuildingCCW)) {
+            return Evaluation.rejected(pair, RejectReason.ROAD_BEHIND_WALL);
+        }
+        if (pointsInward(wallMidPoint.minus(reachedPoint), roadEdge, isRoadCCW)) {
+            return Evaluation.rejected(pair, RejectReason.WALL_BEHIND_ROAD_EDGE);
+        }
+
+        // Slide the connecting point so that the entrance fits within the road edge
+        Point2D connectingPoint = slideIntoEdge(reachedPoint, roadEdge);
+        Line2D entranceCentreLine = new Line2D(wallMidPoint, connectingPoint);
+        double entranceLength = entranceCentreLine.getDirection().getLength();
+        double angleDeviation = calculateAngleDeviation(entranceCentreLine, buildingEdge, roadEdge);
+
+        Vector2D wallVector = buildingEdge.getLine().getDirection().normalised();
+        Vector2D roadVector = roadEdge.getLine().getDirection().normalised();
+        double halfWidth = entranceWidth / 2.0;
+        Node b1 = map.getNode(wallMidPoint.plus(wallVector.scale(-halfWidth)));
+        Node b2 = map.getNode(wallMidPoint.plus(wallVector.scale(halfWidth)));
+        Node r1 = map.getNode(connectingPoint.plus(roadVector.scale(-halfWidth)));
+        Node r2 = map.getNode(connectingPoint.plus(roadVector.scale(halfWidth)));
+
+        // Build entrance edges, merging nearby nodes and skipping degenerate shapes.
+        List<DirectedEdge> entranceEdges = buildEntranceEdges(b1, b2, r1, r2, wallVector, roadVector);
+        if (entranceEdges == null) {
+            return Evaluation.rejected(pair, RejectReason.DEGENERATE_ENTRANCE, entranceLength, angleDeviation);
+        }
+        if (connectingEdgesCrossOwnGeometry(entranceEdges, b1, b2, buildingEdge, roadEdge, building, road)) {
+            return Evaluation.rejected(pair, RejectReason.CROSSES_OWN_GEOMETRY, entranceLength, angleDeviation);
+        }
+
+        TemporaryIntersection entrance = new TemporaryIntersection(entranceEdges);
+
+        if (entranceLength < minConnectDistance) {
+            return Evaluation.rejected(pair, RejectReason.TOO_SHORT, entranceLength, angleDeviation);
+        }
+        if (maxConnectDistance < entranceLength) {
+            return Evaluation.rejected(pair, RejectReason.TOO_LONG, entranceLength, angleDeviation);
+        }
+        if (!isAngleAcceptable(angleDeviation)) {
+            return Evaluation.rejected(pair, RejectReason.ANGLE_DEVIATION, entranceLength, angleDeviation);
+        }
+
+        Optional<TemporaryObject> collideWith = findCollidingObject(entrance, building, road);
+        if (collideWith.isPresent()) {
+            return Evaluation.collided(pair, entranceLength, angleDeviation, collideWith.get());
+        }
+
+        EntrancePlan plan = new EntrancePlan(entrance, buildingEdge.getEdge(), roadEdge.getEdge(), b1, b2, r1, r2);
+        return Evaluation.accepted(pair, plan, entranceLength, angleDeviation);
     }
 
     // Returns the unit normal of the edge that points out of the polygon
@@ -241,6 +300,34 @@ public class CreateEntrancesStep extends ConvertStep {
 
     private boolean pointsInward(final Vector2D direction, final DirectedEdge polygonEdge, boolean isCCW) {
         return direction.dot(outwardNormal(polygonEdge, isCCW)) < 0;
+    }
+
+    private Point2D slideIntoEdge(Point2D point, DirectedEdge edge) {
+        Line2D line = edge.getLine();
+        Vector2D direction = line.getDirection().normalised();
+        double halfWidth = entranceWidth / 2.0;
+        double distFromStart = GeometryTools2D.getDistance(line.getOrigin(), point);
+        double distFromEnd = edge.getLength() - distFromStart;
+
+        if (distFromStart < halfWidth) return point.plus(direction.scale(halfWidth - distFromStart));
+        if (distFromEnd < halfWidth) return point.plus(direction.scale(distFromEnd - halfWidth));
+        return point;
+    }
+
+    // Returns the first object other than the building and road that overlaps the candidate
+    private Optional<TemporaryObject> findCollidingObject(
+            TemporaryIntersection candidate, TemporaryBuilding building, TemporaryRoad road) {
+        Area entranceArea = new Area(candidate.getShape());
+        return map.getAllObjects().stream()
+                .filter(other -> !other.equals(building) && !other.equals(road))
+                .filter(other -> overlaps(entranceArea, other))
+                .findFirst();
+    }
+
+    private boolean overlaps(Area area, TemporaryObject object) {
+        Area otherArea = new Area(object.getShape());
+        otherArea.intersect(area);
+        return !otherArea.isEmpty();
     }
 
     private boolean connectingEdgesCrossOwnGeometry(
@@ -326,20 +413,6 @@ public class CreateEntrancesStep extends ConvertStep {
     // Only the angle-based strategy discards candidates by angle deviation.
     private boolean isAngleAcceptable(double angleDeviation) {
         return strategy != EntranceStrategy.MIN_ANGLE_DEVIATION || angleDeviation <= maxAngleDeviation;
-    }
-
-    private boolean hasCollision(
-            TemporaryIntersection candidate, TemporaryBuilding building, TemporaryRoad road) {
-
-        final Area entranceArea = new Area(candidate.getShape());
-        for (TemporaryObject otherObject : map.getAllObjects()) {
-            Area otherArea = new Area(otherObject.getShape());
-            otherArea.intersect(entranceArea);
-            if (otherArea.isEmpty()) continue;
-            if (!otherObject.equals(building) && !otherObject.equals(road)) return true;
-        }
-
-        return false;
     }
 
     // Returns the score used to rank candidates; lower is better.
