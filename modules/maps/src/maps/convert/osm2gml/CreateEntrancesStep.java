@@ -11,7 +11,6 @@ import rescuecore2.misc.geometry.Line2D;
 import rescuecore2.misc.geometry.Point2D;
 import rescuecore2.misc.geometry.Vector2D;
 
-import java.awt.geom.Area;
 import java.util.*;
 
 /**
@@ -317,17 +316,10 @@ public class CreateEntrancesStep extends ConvertStep {
     // Returns the first object other than the building and road that overlaps the candidate
     private Optional<TemporaryObject> findCollidingObject(
             TemporaryIntersection candidate, TemporaryBuilding building, TemporaryRoad road) {
-        Area entranceArea = new Area(candidate.getShape());
         return map.getAllObjects().stream()
                 .filter(other -> !other.equals(building) && !other.equals(road))
-                .filter(other -> overlaps(entranceArea, other))
+                .filter(other -> ConvertTools.overlaps(candidate, other))
                 .findFirst();
-    }
-
-    private boolean overlaps(Area area, TemporaryObject object) {
-        Area otherArea = new Area(object.getShape());
-        otherArea.intersect(area);
-        return !otherArea.isEmpty();
     }
 
     private boolean connectingEdgesCrossOwnGeometry(

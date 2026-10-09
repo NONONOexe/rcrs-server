@@ -356,4 +356,22 @@ public final class ConvertTools {
                 .toList();
     }
 
+    /**
+     * Returns whether the shapes of the two objects overlap with a positive area.
+     * Objects that only touch along an edge or at a point do not overlap.
+     *
+     * @param a the first object
+     * @param b the second object
+     * @return {@code true} if the shapes of the two objects share a non-empty area;
+     *         {@code false} otherwise
+     */
+    public static boolean overlaps(TemporaryObject a, TemporaryObject b) {
+        // Quick rejection by bounding boxes
+        if (!a.getBounds().intersects(b.getBounds())) {
+            return false;
+        }
+        Area intersection = new Area(a.getShape());
+        intersection.intersect(new Area(b.getShape()));
+        return !intersection.isEmpty();
+    }
 }
