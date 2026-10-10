@@ -55,16 +55,21 @@ public class CreateTempObjectsStep extends ConvertStep {
 
         for (OSMObjectInfo shape : osmShapes) {
             if (shape.getArea() == null) {
+                logNoArea(shape);
                 bumpProgress();
                 continue;
             }
 
             List<DirectedEdge> edges = generateEdges(shape);
-            if (2 < edges.size()) {
-                TemporaryObject newObject = shape.createTemporaryObject(edges);
-                map.addTemporaryObject(newObject);
-                created.add(newObject);
+            if (edges.size() < 3) {
+                logTooFewEdges(shape, edges.size());
+                bumpProgress();
+                continue;
             }
+
+            TemporaryObject newObject = shape.createTemporaryObject(edges);
+            map.addTemporaryObject(newObject);
+            created.add(newObject);
             bumpProgress();
         }
         return created;
@@ -112,5 +117,17 @@ public class CreateTempObjectsStep extends ConvertStep {
     private void logCount(Class<? extends TemporaryObject> type, int osmCount, int createdCount) {
         LOGGER.info("TEMP_OBJECTS_COUNT object_type={} osm_count={} created_count={}",
                 type.getSimpleName(), osmCount, createdCount);
+    }
+
+    // Logs a shape skipped because it has no area (some vertices are unset)
+    private void logNoArea(OSMObjectInfo shape) {
+        LOGGER.info("TEMP_OBJECT_SKIPPED reason=NO_AREA shape_type={} shape={}",
+                shape.getClass().getSimpleName(), shape);
+    }
+
+    // Logs a shape skipped because snapping its vertices to nodes left fewer than 3 edges
+    private void logTooFewEdges(OSMObjectInfo shape, int edgeCount) {
+        LOGGER.info("TEMP_OBJECT_SKIPPED reason=TOO_FEW_EDGES shape_type={} vertex_count={} edge_count={} shape={}",
+                shape.getClass().getSimpleName(), shape.getVertices().size(), edgeCount, shape);
     }
 }
