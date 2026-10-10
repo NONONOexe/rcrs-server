@@ -33,9 +33,11 @@ public class CreateEntrancesStep extends ConvertStep {
      */
     public enum EntranceStrategy {
         /**
-         * Connects the wall midpoint to the closest point on each nearby road edge, discards
-         * candidates exceeding the angle tolerance, and selects the candidate whose center line
-         * is closest to perpendicular to both the wall and the road edge.
+         * Connects each wall to the closest point on nearby road edges and selects the candidate
+         * whose center line is the closest perpendicular to both the wall and the road edge.
+         *
+         * <p>The wall end starts at the wall midpoint and shifts along the wall the road end
+         * has to move to fit the entrance width. Candidates exceeding the angle tolerance are discarded.
          */
         MIN_ANGLE_DEVIATION,
 
@@ -288,17 +290,17 @@ public class CreateEntrancesStep extends ConvertStep {
             return Evaluation.rejected(pair, RejectReason.WALL_BEHIND_ROAD_EDGE);
         }
 
-        // Slide the connecting point so that the entrance fits within the road edge
-        Point2D connectingPoint = slideIntoEdge(reachedPoint, roadEdge);
-        Line2D entranceCentreLine = new Line2D(wallMidPoint, connectingPoint);
-        double entranceLength = entranceCentreLine.getDirection().getLength();
-        double angleDeviation = calculateAngleDeviation(entranceCentreLine, buildingEdge, roadEdge);
+        Line2D entranceCenterLine = createCenterLine(buildingEdge, roadEdge, wallMidPoint, reachedPoint);
+        Point2D wallPoint = entranceCenterLine.getOrigin();
+        Point2D connectingPoint = entranceCenterLine.getEndPoint();
+        double entranceLength = entranceCenterLine.getDirection().getLength();
+        double angleDeviation = calculateAngleDeviation(entranceCenterLine, buildingEdge, roadEdge);
 
         Vector2D wallVector = buildingEdge.getLine().getDirection().normalised();
         Vector2D roadVector = roadEdge.getLine().getDirection().normalised();
         double halfWidth = entranceWidth / 2.0;
-        Node b1 = map.getNode(wallMidPoint.plus(wallVector.scale(-halfWidth)));
-        Node b2 = map.getNode(wallMidPoint.plus(wallVector.scale(halfWidth)));
+        Node b1 = map.getNode(wallPoint.plus(wallVector.scale(-halfWidth)));
+        Node b2 = map.getNode(wallPoint.plus(wallVector.scale(halfWidth)));
         Node r1 = map.getNode(connectingPoint.plus(roadVector.scale(-halfWidth)));
         Node r2 = map.getNode(connectingPoint.plus(roadVector.scale(halfWidth)));
 
@@ -334,6 +336,28 @@ public class CreateEntrancesStep extends ConvertStep {
         return Evaluation.accepted(pair, plan, entranceLength, angleDeviation);
     }
 
+    // Returns the center line of the entrance, from the point on the wall to the point on the road edge
+    private Line2D createCenterLine(DirectedEdge buildingEdge, DirectedEdge roadEdge, Point2D wallMidPoint, Point2D reachedPoint) {
+        // The prior method keeps the entrance on the perpendicular of the wall midpoint
+        if (strategy == EntranceStrategy.NEAREST_PERPENDICULAR) {
+            return new Line2D(wallMidPoint, closestPointWithinMargin(roadEdge, reachedPoint));
+        }
+
+        Point2D roadPoint = closestPointWithinMargin(roadEdge, wallMidPoint);
+        Point2D wallPoint = closestPointWithinMargin(buildingEdge, roadPoint);
+        return new Line2D(wallPoint, roadPoint);
+    }
+
+    // Returns the point on the edge closest to the point, keeping half an entrance width from both ends
+    private Point2D closestPointWithinMargin(DirectedEdge edge, Point2D point) {
+        Line2D line = edge.getLine();
+        Vector2D direction = line.getDirection().normalised();
+        double halfWidth = entranceWidth / 2.0;
+        double distance = point.minus(line.getOrigin()).dot(direction);
+        double clamped = Math.clamp(distance, halfWidth, edge.getLength() - halfWidth);
+        return line.getOrigin().plus(direction.scale(clamped));
+    }
+
     // Returns the unit normal of the edge that points out of the polygon
     private Vector2D outwardNormal(DirectedEdge polygonEdge, boolean isCCW) {
         Vector2D edgeDirection = polygonEdge.getLine().getDirection().normalised();
@@ -342,18 +366,6 @@ public class CreateEntrancesStep extends ConvertStep {
 
     private boolean pointsInward(final Vector2D direction, final DirectedEdge polygonEdge, boolean isCCW) {
         return direction.dot(outwardNormal(polygonEdge, isCCW)) < 0;
-    }
-
-    private Point2D slideIntoEdge(Point2D point, DirectedEdge edge) {
-        Line2D line = edge.getLine();
-        Vector2D direction = line.getDirection().normalised();
-        double halfWidth = entranceWidth / 2.0;
-        double distFromStart = GeometryTools2D.getDistance(line.getOrigin(), point);
-        double distFromEnd = edge.getLength() - distFromStart;
-
-        if (distFromStart < halfWidth) return point.plus(direction.scale(halfWidth - distFromStart));
-        if (distFromEnd < halfWidth) return point.plus(direction.scale(distFromEnd - halfWidth));
-        return point;
     }
 
     // Returns the first object other than the building and road that overlaps the candidate
