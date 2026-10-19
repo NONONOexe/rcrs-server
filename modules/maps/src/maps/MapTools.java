@@ -22,10 +22,6 @@ public final class MapTools {
     }
 
     public static double sizeOf1MetreLongitude(double lat, double lon) {
-        UTM centre = UTM.latLongToUtm(LatLong.valueOf(lat, lon, NonSI.DEGREE_ANGLE), ReferenceEllipsoid.WGS84);
-        UTM offset = UTM.valueOf(centre.longitudeZone(), centre.latitudeZone(),
-                centre.eastingValue(SI.METRE) + 1, centre.northingValue(SI.METRE), SI.METRE);
-        LatLong result = UTM.utmToLatLong(offset, ReferenceEllipsoid.WGS84);
-        return Math.abs(result.longitudeValue(NonSI.DEGREE_ANGLE) - lon);
+        return sizeOf1MetreLatitude(lat, lon);
     }
 }
