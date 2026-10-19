@@ -59,11 +59,7 @@ public class RoadAspect {
     }
 
     public double getWidth(final double sizeOf1Meter) {
-        final OSMRoadType roadType = road.getType();
-        final double widthMeter = road.hasLaneCount() ?
-                road.getLaneCount() * roadType.getLaneWidth() + 2 * roadType.getShoulderWidth() :
-                roadType.getDefaultWidth();
-        return widthMeter * sizeOf1Meter;
+        return Constants.ROAD_WIDTH * sizeOf1Meter;
     }
 
     public Line2D getMouthBoundary() {
