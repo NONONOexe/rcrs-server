@@ -373,12 +373,18 @@ public class OSMMap {
             Map<String, String> tags = readTags(relation);
             if (!"multipolygon".equals(tags.get("type"))) continue;
             if (!OSMBuilding.isBuildingTagValue(tags.get("building"))) continue;
+            if (hasInnerMember(relation)) continue;
 
             for (List<Long> ring : outerRings(relation, wayNodes)) {
                 buildings.put(nextId, new OSMBuilding(nextId, ring));
                 nextId++;
             }
         }
+    }
+
+    private boolean hasInnerMember(Element relation) {
+        return relation.elements("member").stream()
+                .anyMatch(member -> "inner".equals(member.attributeValue("role")));
     }
 
     // Reads the node IDs of all ways, including untagged ways that make up rings
